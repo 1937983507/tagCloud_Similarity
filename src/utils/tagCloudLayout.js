@@ -1,7 +1,14 @@
 /**
  * 标签云布局算法
  * 实现多角度径向移位算法（阿基米德螺线 + 方位角约束）
+ * 单角度径向移位算法
+ * d3-cloud 阿基米德螺线算法
  */
+
+// d3-cloud 的导入方式
+// 注意：d3-cloud 可能使用不同的导出方式，根据实际情况调整
+import * as d3Cloud from 'd3-cloud';
+const cloud = d3Cloud.default || d3Cloud;
 
 /**
  * 计算两点之间的方位角（以正北为0度，顺时针）
@@ -40,6 +47,66 @@ export function isOverlapping(rect1, rect2, padding = 2) {
     rect1.y + rect1.height + padding < rect2.y ||
     rect2.y + rect2.height + padding < rect1.y
   );
+}
+
+/**
+ * 单角度径向移位算法
+ * 直接按照真实方位角从中心向外径向移动，直到找到空闲区域
+ * @param {number} centerX - 中心点X坐标
+ * @param {number} centerY - 中心点Y坐标
+ * @param {number} bearing - 真实方位角（度数）
+ * @param {number} width - 标签宽度
+ * @param {number} height - 标签高度
+ * @param {Array} placedLabels - 已放置的标签数组
+ * @returns {Object} 放置位置 {x, y}（保证能找到）
+ */
+export function findPositionWithRadial(
+  centerX,
+  centerY,
+  bearing,
+  width,
+  height,
+  placedLabels
+) {
+  // 起始半径（从中心稍微偏移，避免与中心标签重叠）
+  let radius = 5;
+  const radiusIncrement = 5; // 每次增加的半径步长
+  
+  // 将方位角转换为弧度
+  const bearingRad = (bearing * Math.PI) / 180;
+  
+  // 在指定方向上不断向外移动，直到找到合适位置
+  // 由于画布空间无限大，一定能找到位置
+  while (true) {
+    // 计算当前探测点的坐标
+    const x = centerX + radius * Math.sin(bearingRad);
+    const y = centerY - radius * Math.cos(bearingRad); // Canvas坐标系Y轴向下
+    
+    // 创建候选矩形（标签中心对齐）
+    const candidateRect = {
+      x: x - width / 2,
+      y: y - height / 2,
+      width: width,
+      height: height,
+    };
+    
+    // 检查是否与已放置的标签重叠
+    let hasCollision = false;
+    for (const placed of placedLabels) {
+      if (isOverlapping(candidateRect, placed, 4)) {
+        hasCollision = true;
+        break;
+      }
+    }
+    
+    if (!hasCollision) {
+      // 找到合适的位置，返回
+      return { x, y };
+    }
+    
+    // 增加半径，继续向外探测
+    radius += radiusIncrement;
+  }
 }
 
 /**
@@ -140,6 +207,80 @@ export function measureText(text, fontSize, fontFamily = 'Arial', fontWeight = 4
 }
 
 /**
+ * 使用 d3-cloud 进行布局
+ * @param {Array} pois - POI数组（已按相似度排序，包含中心标签）
+ * @param {number} centerX - 中心点Canvas X坐标
+ * @param {number} centerY - 中心点Canvas Y坐标
+ * @param {Object} fontSettings - 字体设置
+ * @param {Function} getPoiDisplayName - 获取POI显示名称的函数
+ * @returns {Promise<Array>} 布局结果数组
+ */
+function layoutWithD3Cloud(
+  pois,
+  centerX,
+  centerY,
+  fontSettings,
+  getPoiDisplayName
+) {
+  return new Promise((resolve) => {
+    // 准备 d3-cloud 的数据
+    // 按字体大小降序排序，确保大号字体（中心标签）先布局，会在中心位置
+    const words = pois
+      .map((poi) => {
+        const displayName = getPoiDisplayName(poi);
+        const fontSize = poi.fontSize || fontSettings.fontSizes[0];
+        
+        return {
+          text: displayName,
+          size: fontSize,
+          poi: poi,
+        };
+      })
+      .sort((a, b) => b.size - a.size); // 按字体大小降序排序
+    
+    // 创建临时canvas用于测量文本
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // 配置 d3-cloud
+    const layout = cloud()
+      .size([10000, 10000]) // 设置较大的画布尺寸
+      .canvas(() => tempCanvas)
+      .words(words)
+      .padding(4)
+      .rotate(() => 0) // 不旋转文本
+      .font(fontSettings.fontFamily)
+      .fontWeight(fontSettings.fontWeight)
+      .fontSize((d) => d.size)
+      .random((d) => 0.5)
+      .on('end', (words) => {
+        // 将 d3-cloud 的结果转换为我们的格式
+        const layoutResults = words.map((word) => {
+          // 将坐标从 d3-cloud 的坐标系转换到我们的坐标系（以 centerX, centerY 为中心）
+          const x = centerX + (word.x || 0);
+          const y = centerY + (word.y || 0);
+          
+          return {
+            poi: word.poi,
+            text: word.text,
+            x: x,
+            y: y,
+            width: word.width || 0,
+            height: word.height || 0,
+            fontSize: word.size,
+            bearing: 0, // d3-cloud 不提供方位角
+          };
+        });
+        
+        resolve(layoutResults);
+      });
+    
+    // 开始布局
+    layout.start();
+  });
+}
+
+/**
  * 布局标签云
  * @param {Array} pois - POI数组（已按相似度排序）
  * @param {Object} center - 中心点 {lng, lat}
@@ -147,10 +288,9 @@ export function measureText(text, fontSize, fontFamily = 'Arial', fontWeight = 4
  * @param {number} centerY - 中心点Canvas Y坐标
  * @param {Object} fontSettings - 字体设置
  * @param {Function} getPoiDisplayName - 获取POI显示名称的函数
- * @param {boolean} showRank - 是否显示排名
- * @param {boolean} showTime - 是否显示时间
- * @param {Object} centerLabelRect - 中心标签矩形 {x, y, width, height}，用于避免压盖
- * @returns {Array} 布局结果数组
+ * @param {Object} centerLabelRect - 中心标签矩形 {x, y, width, height}，用于避免压盖（非d3-cloud算法使用）
+ * @param {string} algorithm - 布局算法：'multi-angle-radial' | 'single-angle-radial' | 'archimedean-spiral'
+ * @returns {Array|Promise<Array>} 布局结果数组（d3-cloud 返回 Promise）
  */
 export function layoutTagCloud(
   pois,
@@ -159,10 +299,22 @@ export function layoutTagCloud(
   centerY,
   fontSettings,
   getPoiDisplayName,
-  showRank = false,
-  showTime = false,
-  centerLabelRect = null
+  centerLabelRect = null,
+  algorithm = 'multi-angle-radial'
 ) {
+  // 如果使用 d3-cloud 算法，返回 Promise
+  // d3-cloud 会将所有标签（包括中心标签）一起布局，所以不需要 centerLabelRect
+  if (algorithm === 'archimedean-spiral') {
+    return layoutWithD3Cloud(
+      pois,
+      centerX,
+      centerY,
+      fontSettings,
+      getPoiDisplayName
+    );
+  }
+  
+  // 其他算法使用同步方式
   const placedLabels = [];
   
   // 如果有中心标签矩形，将其添加到已放置标签列表中，避免其他标签压盖
@@ -185,19 +337,9 @@ export function layoutTagCloud(
     // 计算真实方位角
     const bearing = calculateBearing(center.lat, center.lng, poi.lat, poi.lng);
     
-    // 构建标签文本
+    // 构建标签文本（不显示排名和时间）
     const displayName = getPoiDisplayName(poi);
-    let labelText = displayName;
-    const rankPart = showRank && poi.rank ? String(poi.rank) : '';
-    const timePart = showTime && poi.time ? String(poi.time) : '';
-    
-    if (rankPart && timePart) {
-      labelText = `${displayName} ${rankPart}|${timePart}`;
-    } else if (rankPart) {
-      labelText = `${displayName} ${rankPart}`;
-    } else if (timePart) {
-      labelText = `${displayName} ${timePart}`;
-    }
+    const labelText = displayName;
     
     // 获取字体大小（根据相似度等级）
     const fontSize = poi.fontSize || fontSettings.fontSizes[0];
@@ -210,15 +352,29 @@ export function layoutTagCloud(
       fontSettings.fontWeight
     );
     
-    // 使用阿基米德螺线算法找到合适的位置
-    const position = findPositionWithSpiral(
-      centerX,
-      centerY,
-      bearing,
-      width,
-      height,
-      placedLabels
-    );
+    // 根据算法选择不同的布局方法
+    let position;
+    if (algorithm === 'single-angle-radial') {
+      // 单角度径向移位算法
+      position = findPositionWithRadial(
+        centerX,
+        centerY,
+        bearing,
+        width,
+        height,
+        placedLabels
+      );
+    } else {
+      // 多角度径向移位算法（默认）
+      position = findPositionWithSpiral(
+        centerX,
+        centerY,
+        bearing,
+        width,
+        height,
+        placedLabels
+      );
+    }
     
     // 记录已放置的标签
     const placedRect = {

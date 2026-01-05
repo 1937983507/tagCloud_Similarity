@@ -17,6 +17,7 @@
         />
         <div class="workspace">
           <PoiContent ref="poiContentRef" v-show="activePanel === 'content'" />
+          <AlgorithmPanel v-show="activePanel === 'algorithm'" />
           <TypefacePanel v-show="activePanel === 'typeface'" />
           <ColorPanel v-show="activePanel === 'color'" />
         </div>
@@ -36,6 +37,7 @@ import HeaderBar from '@/components/layout/HeaderBar.vue';
 import FooterBar from '@/components/layout/FooterBar.vue';
 import SideMenu from '@/components/layout/SideMenu.vue';
 import PoiContent from '@/components/content/PoiContent.vue';
+import AlgorithmPanel from '@/components/algorithm/AlgorithmPanel.vue';
 import TypefacePanel from '@/components/typeface/TypefacePanel.vue';
 import ColorPanel from '@/components/color/ColorPanel.vue';
 import TagCloudCanvas from '@/components/tagcloud/TagCloudCanvas.vue';

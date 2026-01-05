@@ -725,14 +725,19 @@ const renderCloud = async (shouldInitPyramid = false) => {
     const similarityRange = maxSimilarity - minSimilarity;
 
     // 为当前尺度下的POI分配字号和颜色
+    // 计算中心标签字号（比第1级字号大20%）
+    const firstLevelFontSize = fontSizes && fontSizes.length > 0 ? fontSizes[0] : 64;
+    const centerFontSize = firstLevelFontSize * 1.2; // 比第1级大20%（不乘以resolutionScale，因为会在绘制时统一处理）
+    
     const poisWithStyle = poisToRender.map((poi) => {
       if (poi.id === centerPoi.id) {
-        // 中心地点使用最大字号和第一个颜色
+        // 中心地点使用特殊样式（与drawCenter函数中的样式一致）
         return {
           ...poi,
-          fontSize: fontSizes[fontSizes.length - 1] || fontSizes[0],
-          fontColor: palette[0] || '#000000',
+          fontSize: centerFontSize,
+          fontColor: 'rgb(255, 255, 255)', // 白色
           similarityLevel: 0,
+          isCenter: true, // 标记为中心标签
         };
       }
 
@@ -781,35 +786,85 @@ const renderCloud = async (shouldInitPyramid = false) => {
     const centerX = canvasWidth.value / 2;
     const centerY = canvasHeight.value / 2;
 
-    // 绘制中心位置，并获取中心标签的矩形信息
-    const centerLabelRect = drawCenter(centerX, centerY, center, sourceList);
-
+    // 获取当前选择的布局算法
+    const layoutAlgorithm = poiStore.algorithmSettings?.layoutAlgorithm || 'multi-angle-radial';
+    
     // 创建POI ID到样式的映射（用于快速查找）
     const poiStyleMap = new Map();
     poisWithStyle.forEach(poi => {
       poiStyleMap.set(poi.id, poi);
     });
 
-    // 使用布局算法生成标签云（传入中心标签矩形，避免压盖）
-    const poisForLayout = poisToRender
-      .filter(poi => poi.id !== centerPoi.id)
-      .map(poi => {
-        // 从样式映射中获取样式信息
+    // 根据算法类型准备POI数据和中心标签处理
+    let poisForLayout;
+    let centerLabelRect = null;
+    
+    if (layoutAlgorithm === 'archimedean-spiral') {
+      // d3-cloud 算法：将中心标签也纳入布局，不单独绘制
+      // 确保中心标签被包含在布局中
+      const centerPoiStyled = poiStyleMap.get(centerPoi.id);
+      if (!centerPoiStyled) {
+        console.warn('中心标签不在样式映射中，使用默认样式');
+      }
+      
+      // 从 poisToRender 中获取所有POI（可能不包含中心标签）
+      const poisFromRender = poisToRender.map(poi => {
         const styledPoi = poiStyleMap.get(poi.id) || poi;
         return styledPoi;
       });
-
-    const layoutResults = layoutTagCloud(
+      
+      // 检查中心标签是否已经在列表中
+      const hasCenterPoi = poisFromRender.some(p => p.id === centerPoi.id);
+      if (hasCenterPoi) {
+        poisForLayout = poisFromRender;
+      } else {
+        // 如果中心标签不在列表中，添加到最前面（确保大号字体优先布局）
+        if (centerPoiStyled) {
+          poisForLayout = [centerPoiStyled, ...poisFromRender];
+        } else {
+          // 如果样式映射中没有中心标签，使用原始 centerPoi 并应用样式
+          const fontSizes = poiStore.fontSettings.fontSizes;
+          const firstLevelFontSize = fontSizes && fontSizes.length > 0 ? fontSizes[0] : 64;
+          const centerFontSize = firstLevelFontSize * 1.2; // 比第1级大20%（不乘以resolutionScale，因为会在绘制时统一处理）
+          const centerPoiWithStyle = {
+            ...centerPoi,
+            fontSize: centerFontSize,
+            fontColor: 'rgb(255, 255, 255)', // 白色，与drawCenter一致
+            similarityLevel: 0,
+            isCenter: true, // 标记为中心标签
+          };
+          poisForLayout = [centerPoiWithStyle, ...poisFromRender];
+        }
+      }
+      
+      console.log(`d3-cloud 布局：准备 ${poisForLayout.length} 个标签，中心标签ID: ${centerPoi.id}，是否包含: ${poisForLayout.some(p => p.id === centerPoi.id)}`);
+      // d3-cloud 不需要 centerLabelRect，因为中心标签也在布局中
+    } else {
+      // 其他算法：单独绘制中心标签，排除中心标签进行布局
+      centerLabelRect = drawCenter(centerX, centerY, centerPoi);
+      poisForLayout = poisToRender
+        .filter(poi => poi.id !== centerPoi.id)
+        .map(poi => {
+          // 从样式映射中获取样式信息
+          const styledPoi = poiStyleMap.get(poi.id) || poi;
+          return styledPoi;
+        });
+    }
+    
+    // 调用布局函数（d3-cloud 返回 Promise，其他算法返回数组）
+    const layoutResult = layoutTagCloud(
       poisForLayout,
       center,
       centerX,
       centerY,
       poiStore.fontSettings,
       getPoiDisplayName,
-      false, // showRank - 已删除
-      false, // showTime - 已删除
-      centerLabelRect // 传递中心标签矩形
+      centerLabelRect, // 传递中心标签矩形（非d3-cloud算法使用）
+      layoutAlgorithm // 传递算法类型
     );
+    
+    // 处理异步布局（d3-cloud）或同步布局（其他算法）
+    const layoutResults = await (layoutResult instanceof Promise ? layoutResult : Promise.resolve(layoutResult));
 
     // 在canvas上绘制标签
     layoutResults.forEach((result) => {
@@ -817,13 +872,19 @@ const renderCloud = async (shouldInitPyramid = false) => {
       // 从样式映射中获取颜色和字号
       const styledPoi = poiStyleMap.get(poi.id) || poi;
       
+      // 判断是否为中心标签
+      const isCenterLabel = poi.id === centerPoi.id || styledPoi.isCenter;
+      
+      // 中心标签使用特殊样式（与drawCenter函数中的样式一致）
       const textObj = new Textbox(result.text, {
         left: result.x,
         top: result.y,
-        fill: styledPoi.fontColor || poiStore.colorSettings.palette[0],
+        fill: isCenterLabel ? 'rgb(255, 255, 255)' : (styledPoi.fontColor || poiStore.colorSettings.palette[0]),
         fontSize: result.fontSize * resolutionScale,
-        fontFamily: poiStore.fontSettings.fontFamily,
-        fontWeight: poiStore.fontSettings.fontWeight,
+        fontFamily: isCenterLabel ? 'Comic Sans' : poiStore.fontSettings.fontFamily,
+        fontWeight: isCenterLabel ? 1000 : poiStore.fontSettings.fontWeight,
+        strokeWidth: isCenterLabel ? 5 : 0,
+        stroke: isCenterLabel ? 'rgba(255,255,255,0.7)' : undefined,
         textAlign: 'center',
         originX: 'center',
         originY: 'center',
@@ -1177,38 +1238,41 @@ const calculateClassIndex = (data, index, total, colorNum, discreteMethod) => {
   return calculateClassIndexOptimized(entry, index, total, colorNum, discreteMethod, colorCache);
 };
 
-// 绘制中心位置
-const drawCenter = (centerX, centerY, center, sourceList) => {
-  const language = poiStore.fontSettings.language || 'zh';
+// 找到距离中心最近的POI作为中心地点
+const findCenterPoi = (center, sourceList) => {
+  if (!sourceList || sourceList.length === 0) {
+    return null;
+  }
   
-  // 找到距离中心最近的POI作为中心标签
-  let centerLabelText;
   let nearestPoi = null;
   let minDistance = Infinity;
   
-  if (sourceList && sourceList.length > 0) {
-    for (const poi of sourceList) {
-      const distance = calculateDistance(
-        center.lat,
-        center.lng,
-        poi.lat,
-        poi.lng,
-      );
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestPoi = poi;
-      }
+  for (const poi of sourceList) {
+    const distance = calculateDistance(
+      center.lat,
+      center.lng,
+      poi.lat,
+      poi.lng,
+    );
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearestPoi = poi;
     }
-    
-    // 如果找到最近的POI，使用它的名称
-    if (nearestPoi) {
-      centerLabelText = getPoiDisplayName(nearestPoi);
-    } else {
-      // 如果没有找到，使用默认文本
-      centerLabelText = language === 'en' ? 'Center' : '中心位置';
-    }
+  }
+  
+  return nearestPoi;
+};
+
+// 绘制中心位置（接收中心POI作为参数）
+const drawCenter = (centerX, centerY, centerPoi) => {
+  const language = poiStore.fontSettings.language || 'zh';
+  
+  // 获取中心标签文本
+  let centerLabelText;
+  if (centerPoi) {
+    centerLabelText = getPoiDisplayName(centerPoi);
   } else {
-    // 显示"中心位置"
+    // 如果没有中心POI，使用默认文本
     centerLabelText = language === 'en' ? 'Center' : '中心位置';
   }
   
@@ -2250,6 +2314,20 @@ watch(
     
     if (allowRenderCloud.value) {
       // 语言变化需要重新绘制（文本内容变化）
+      renderCloud(false);
+    }
+  },
+);
+
+// 监听算法设置变化，触发重新渲染
+watch(
+  () => poiStore.algorithmSettings?.layoutAlgorithm,
+  () => {
+    // 如果正在清除，不触发重新渲染
+    if (isClearing.value) return;
+    
+    if (allowRenderCloud.value) {
+      // 算法变化需要重新绘制
       renderCloud(false);
     }
   },
