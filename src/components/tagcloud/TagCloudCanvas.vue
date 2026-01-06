@@ -65,7 +65,7 @@
       
       <!-- 距离图例 -->
       <div class="distance-legend">
-        <p class="legend-title">{{ poiStore.fontSettings.language === 'en' ? 'Distance from Center (km)' : '与中心的距离(km)' }}</p>
+        <p class="legend-title">{{ poiStore.fontSettings.language === 'en' ? 'Semantic Similarity' : '语义相似度' }}</p>
         <div class="legend-colors-wrapper">
           <div class="legend-colors" ref="legendColorsRef">
             <div
@@ -77,22 +77,22 @@
               @mouseleave="handleLegendLeave"
             ></div>
           </div>
-          <!-- 在色块下面一行显示距离标签 -->
-          <div v-if="allowRenderCloud && colorBoundaries.length > 0 && maxDistance > 0" class="legend-boundaries">
-            <span class="legend-boundary-label legend-start">0</span>
+          <!-- 在色块下面一行显示相似度标签 -->
+          <div v-if="allowRenderCloud && colorBoundaries.length > 0 && maxSimilarity !== undefined && minSimilarity !== undefined" class="legend-boundaries">
+            <span class="legend-boundary-label legend-start">{{ formatSimilarity(maxSimilarity) }}</span>
             <span
               v-for="(boundary, index) in colorBoundaries"
               :key="`boundary-${index}`"
               class="legend-boundary-label legend-middle"
               :style="{ left: `${((index + 1) * 100) / paletteCount}%` }"
             >
-              {{ formatDistance(boundary) }}
+              {{ formatSimilarity(boundary) }}
             </span>
             <span
-              v-if="maxDistance > 0"
+              v-if="minSimilarity !== undefined"
               class="legend-boundary-label legend-max-distance"
             >
-              {{ formatDistance(maxDistance) }}
+              {{ formatSimilarity(minSimilarity) }}
             </span>
           </div>
         </div>
@@ -262,7 +262,9 @@ let isPanning = ref(true); // 是否启用漫游（默认开启）
 let vpt = [1, 0, 0, 1, 0, 0]; // viewport transform
 let originalCenterX = 0;
 let originalCenterY = 0;
-const maxDistance = ref(0); // 最大距离（米）- 使用ref以便响应式更新
+const maxDistance = ref(0); // 最大距离（米）- 使用ref以便响应式更新（保留用于其他用途）
+const maxSimilarity = ref(undefined); // 最大相似度 - 使用ref以便响应式更新
+const minSimilarity = ref(undefined); // 最小相似度 - 使用ref以便响应式更新
 let poisPyramid = []; // POI数据金字塔
 let tagCloudScale = 0; // 当前显示层级
 const pyramidUpdateTrigger = ref(0); // 用于触发computed更新的触发器
@@ -288,7 +290,7 @@ const similarityProgress = ref(0); // 相似度计算进度（0-100）
 
 let secondIntroStarted = false;
 
-// 计算各个色块之间的分界点距离值
+// 计算各个色块之间的分界点相似度值
 const calculateColorBoundaries = () => {
   // 访问触发器以确保响应式
   pyramidUpdateTrigger.value;
@@ -303,48 +305,39 @@ const calculateColorBoundaries = () => {
     return [];
   }
   
-  // 确保有距离数据
-  if (maxDistance.value === 0) {
-    return [];
-  }
+  // 过滤出有相似度数据的POI（排除中心地点）
+  const poisWithSimilarity = currentData.filter(
+    poi => poi.similarity !== undefined && poi.similarity !== null
+  );
   
-  // 获取中心位置（优先使用绘制覆盖物的中心点）
-  let center;
-  if (poiStore.selectionCenter) {
-    center = {
-      lng: poiStore.selectionCenter.lng,
-      lat: poiStore.selectionCenter.lat,
-    };
-  } else {
-    center = computeCenter(sourceList);
+  if (poisWithSimilarity.length === 0) {
+    return [];
   }
   
   const colorSettings = poiStore.colorSettings;
   const colorNum = colorSettings.discreteCount || colorSettings.palette.length;
   const discreteMethod = colorSettings.discreteMethod || 'quantile';
   
-  // 计算所有POI的距离
-  const entriesWithDistance = currentData.map((poi) => {
-    const distance = calculateDistance(
-      center.lat,
-      center.lng,
-      poi.lat,
-      poi.lng,
-    );
-    return { poi, distance };
+  // 获取所有POI的相似度值
+  const entriesWithSimilarity = poisWithSimilarity.map((poi) => {
+    return { poi, similarity: poi.similarity };
   });
   
-  // 按距离升序排序
-  entriesWithDistance.sort((a, b) => a.distance - b.distance);
+  // 按相似度降序排序（相似度高的在前）
+  entriesWithSimilarity.sort((a, b) => b.similarity - a.similarity);
   
-  const distances = entriesWithDistance.map(entry => entry.distance);
-  if (distances.length === 0) return [];
+  const similarities = entriesWithSimilarity.map(entry => entry.similarity);
+  if (similarities.length === 0) return [];
+  
+  // 更新最大和最小相似度（用于图例显示）
+  maxSimilarity.value = Math.max(...similarities);
+  minSimilarity.value = Math.min(...similarities);
   
   // 预先计算颜色分类所需的公共值
   let colorCache = {};
   if (discreteMethod === 'equal' || discreteMethod === 'geometric') {
-    colorCache.minValue = Math.min(...distances);
-    colorCache.maxValue = Math.max(...distances);
+    colorCache.minValue = Math.min(...similarities);
+    colorCache.maxValue = Math.max(...similarities);
     if (discreteMethod === 'geometric') {
       colorCache.ratio = Math.pow(colorCache.maxValue / colorCache.minValue, 1 / colorNum);
     } else {
@@ -352,32 +345,32 @@ const calculateColorBoundaries = () => {
       colorCache.interval = colorCache.range / colorNum;
     }
   } else if (discreteMethod === 'stddev') {
-    colorCache.mean = distances.reduce((acc, curr) => acc + curr, 0) / distances.length;
+    colorCache.mean = similarities.reduce((acc, curr) => acc + curr, 0) / similarities.length;
     colorCache.stdDev = Math.sqrt(
-      distances.reduce((acc, curr) => acc + Math.pow(curr - colorCache.mean, 2), 0) /
-        distances.length,
+      similarities.reduce((acc, curr) => acc + Math.pow(curr - colorCache.mean, 2), 0) /
+        similarities.length,
     );
     colorCache.stdDevInterval = colorCache.stdDev / colorNum;
     colorCache.halfColorNum = Math.floor(colorNum / 2);
   } else if (discreteMethod === 'jenks') {
-    const values = [...distances].sort((a, b) => a - b);
+    const values = [...similarities].sort((a, b) => a - b);
     colorCache.jenksBreaks = calculateJenks(values, colorNum);
   }
   
   // 为每个entry计算classIndex
-  const entriesWithClass = entriesWithDistance.map((entry, index) => {
+  const entriesWithClass = entriesWithSimilarity.map((entry, index) => {
     let classIndex = 0;
     
     if (discreteMethod === 'quantile') {
-      const percentile = (index + 1) / entriesWithDistance.length;
+      const percentile = (index + 1) / entriesWithSimilarity.length;
       classIndex = Math.ceil(colorNum * percentile) - 1;
     } else {
-      // calculateClassIndexOptimized期望entry有distance属性
-      const entryForClass = { distance: entry.distance };
+      // calculateClassIndexOptimized期望entry有distance属性，这里改为similarity
+      const entryForClass = { distance: entry.similarity }; // 复用distance字段名
       classIndex = calculateClassIndexOptimized(
         entryForClass,
         index,
-        entriesWithDistance.length,
+        entriesWithSimilarity.length,
         colorNum,
         discreteMethod,
         colorCache,
@@ -386,18 +379,24 @@ const calculateColorBoundaries = () => {
     return { ...entry, classIndex };
   });
   
-  // 计算每个色块的最大距离值（作为分界点），不包含最后一个色块
+  // 计算每个色块的最小相似度值（作为分界点），不包含最后一个色块
+  // 注意：相似度高的用前面的颜色，相似度低的用后面的颜色
+  // 所以分界点应该是每个等级的最小相似度（即该等级的下界）
   const boundaries = [];
   for (let i = 0; i < colorNum - 1; i++) {
     const entriesInClass = entriesWithClass.filter(e => e.classIndex === i);
     if (entriesInClass.length > 0) {
-      const maxDist = Math.max(...entriesInClass.map(e => e.distance));
-      boundaries.push(maxDist);
+      // 获取该等级的最小相似度（作为下界）
+      const minSim = Math.min(...entriesInClass.map(e => e.similarity));
+      boundaries.push(minSim);
     } else {
-      // 如果没有数据，使用前一个分界点或最小值
-      boundaries.push(i > 0 ? boundaries[i - 1] : 0);
+      // 如果没有数据，使用前一个分界点或最大值
+      boundaries.push(i > 0 ? boundaries[i - 1] : maxSimilarity.value);
     }
   }
+  
+  // 按相似度降序排序边界（从高到低）
+  boundaries.sort((a, b) => b - a);
   
   return boundaries;
 };
@@ -418,12 +417,22 @@ const formatDistance = (distanceInMeters) => {
   return distanceInKm.toFixed(1);
 };
 
-// 各个色块之间的分界点距离值
+// 格式化相似度数值，显示为百分比或小数
+const formatSimilarity = (similarity) => {
+  if (similarity === undefined || similarity === null) {
+    return '0.00';
+  }
+  // 相似度通常在-1到1之间，显示为3位小数
+  return similarity.toFixed(3);
+};
+
+// 各个色块之间的分界点相似度值
 const colorBoundaries = computed(() => {
   // 访问触发器以确保响应式
   pyramidUpdateTrigger.value;
-  // 访问 maxDistance 以确保响应式
-  maxDistance.value;
+  // 访问相似度值以确保响应式
+  maxSimilarity.value;
+  minSimilarity.value;
   return calculateColorBoundaries();
 });
 
@@ -720,9 +729,9 @@ const renderCloud = async (shouldInitPyramid = false) => {
     }
 
     // 计算相似度的最小值和最大值（用于分级）
-    const minSimilarity = Math.min(...similarities);
-    const maxSimilarity = Math.max(...similarities);
-    const similarityRange = maxSimilarity - minSimilarity;
+    const localMinSimilarity = Math.min(...similarities);
+    const localMaxSimilarity = Math.max(...similarities);
+    const similarityRange = localMaxSimilarity - localMinSimilarity;
 
     // 为当前尺度下的POI分配字号和颜色
     // 计算中心标签字号（比第1级字号大20%）
@@ -746,7 +755,7 @@ const renderCloud = async (shouldInitPyramid = false) => {
       // 将相似度映射到等级（相似度大的等级高，字号大）
       // 相似度范围归一化到 [0, 1]，然后映射到等级
       const normalizedSimilarity = similarityRange > 0 
-        ? (similarity - minSimilarity) / similarityRange 
+        ? (similarity - localMinSimilarity) / similarityRange 
         : 0;
       
       // 相似度大的等级高（反向映射，因为fontSizes数组是从大到小）
@@ -770,12 +779,21 @@ const renderCloud = async (shouldInitPyramid = false) => {
       };
     });
 
-    // 计算最大距离（用于图例）
+    // 计算最大距离（保留用于其他用途）
     const distances = poisToRender.map(poi => {
       if (poi.id === centerPoi.id) return 0;
       return calculateDistance(center.lat, center.lng, poi.lat, poi.lng);
     });
     maxDistance.value = Math.max(...distances, 0);
+    
+    // 计算最大和最小相似度（用于图例）- 使用上面已经计算好的 similarities
+    if (similarities.length > 0) {
+      maxSimilarity.value = Math.max(...similarities);
+      minSimilarity.value = Math.min(...similarities);
+    } else {
+      maxSimilarity.value = undefined;
+      minSimilarity.value = undefined;
+    }
 
     // 清空canvas
     canvasInstance.clear();
@@ -946,6 +964,8 @@ const clearTagCloud = () => {
   isClearing.value = true;
   allowRenderCloud.value = false;
   maxDistance.value = 0;
+  maxSimilarity.value = undefined;
+  minSimilarity.value = undefined;
   poisPyramid = [];
   tagCloudScale = 0;
   isRendering = false;
@@ -1894,7 +1914,7 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
   
   // 获取语言设置
   const language = poiStore.fontSettings.language || 'zh';
-  const titleText = language === 'en' ? 'Distance from Center (km)' : '与中心的距离(km)';
+  const titleText = language === 'en' ? 'Semantic Similarity' : '语义相似度';
   
   // 获取颜色调色板
   const palette = poiStore.colorSettings.palette || [];
@@ -1903,9 +1923,9 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
   
   // 计算各个色块之间的分界点
   const boundaries = calculateColorBoundaries();
-  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value;
+  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value && maxSimilarity.value !== undefined && minSimilarity.value !== undefined;
   
-  // 如果有距离标签，需要增加高度
+  // 如果有相似度标签，需要增加高度
   const boundaryTextHeight = hasBoundaries ? textFontSize + 4 : 0;
   const legendHeightWithBoundaries = legendHeight + boundaryTextHeight;
   
@@ -1913,7 +1933,7 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
   let legendSVG = '';
   
   // 定义图例组
-  legendSVG += `<g id="distance-legend">`;
+  legendSVG += `<g id="similarity-legend">`;
   
   // 绘制圆角矩形背景
   legendSVG += `<rect x="${legendX}" y="${legendY}" width="${legendWidth}" height="${legendHeightWithBoundaries}" rx="${radius}" ry="${radius}" fill="rgba(0,0,0,0.7)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;
@@ -1945,27 +1965,28 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
     currentX += colorBarWidth + colorBarGap;
   });
   
-  // 在色块下面一行绘制距离标签
+  // 在色块下面一行绘制相似度标签
   if (hasBoundaries) {
     const boundaryTextY = colorBarY + colorBarHeight + 4 + textFontSize;
     
-    // 绘制第一个标签 "0"（在第一个色块的左边界）
-    legendSVG += `<text x="${legendX + padding}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="start">0</text>`;
+    // 绘制第一个标签（最大相似度，在第一个色块的左边界）
+    const maxSimText = formatSimilarity(maxSimilarity.value);
+    legendSVG += `<text x="${legendX + padding}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="start">${escapeXML(maxSimText)}</text>`;
     
     // 绘制分界点标签（在每个色块的右边界）
     let currentX = legendX + padding;
     boundaries.forEach((boundary, index) => {
       currentX += colorBarWidth + colorBarGap;
-      const boundaryText = formatDistance(boundary);
+      const boundaryText = formatSimilarity(boundary);
       legendSVG += `<text x="${currentX}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="middle">${escapeXML(boundaryText)}</text>`;
     });
     
-    // 绘制最远距离标签（在最右边）
-    if (maxDistance.value > 0) {
-      const maxDistanceText = formatDistance(maxDistance.value);
+    // 绘制最小相似度标签（在最右边）
+    if (minSimilarity.value !== undefined) {
+      const minSimText = formatSimilarity(minSimilarity.value);
       const totalBarWidth = legendWidth - padding * 2;
       const rightEdgeX = legendX + padding + totalBarWidth; // 最后一个色块右边界
-      legendSVG += `<text x="${rightEdgeX}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="middle">${escapeXML(maxDistanceText)}</text>`;
+      legendSVG += `<text x="${rightEdgeX}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="middle">${escapeXML(minSimText)}</text>`;
     }
   }
   
@@ -2054,7 +2075,7 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   const language = poiStore.fontSettings.language || 'zh';
-  const titleText = language === 'en' ? 'Distance from Center (km)' : '与中心的距离(km)';
+  const titleText = language === 'en' ? 'Semantic Similarity' : '语义相似度';
   ctx.fillText(titleText, legendX + padding, legendY + padding);
   
   // 绘制颜色条
@@ -2065,9 +2086,9 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
   
   // 计算各个色块之间的分界点
   const boundaries = calculateColorBoundaries();
-  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value;
+  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value && maxSimilarity.value !== undefined && minSimilarity.value !== undefined;
   
-  // 如果有距离标签，需要增加高度
+  // 如果有相似度标签，需要增加高度
   const boundaryTextHeight = hasBoundaries ? textFontSize + 4 * scaleY : 0;
   const legendHeightWithBoundaries = legendHeight + boundaryTextHeight;
   
@@ -2098,7 +2119,7 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
     currentX += colorBarWidth + colorBarGap;
   });
   
-  // 在色块下面一行绘制距离标签
+  // 在色块下面一行绘制相似度标签
   if (hasBoundaries) {
     const boundaryTextY = colorBarY + colorBarHeight + 4 * scaleY + textFontSize;
     
@@ -2106,26 +2127,27 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
     ctx.font = `${textFontSize}px sans-serif`;
     ctx.textBaseline = 'top';
     
-    // 绘制第一个标签 "0"（在第一个色块的左边界）
+    // 绘制第一个标签（最大相似度，在第一个色块的左边界）
     ctx.textAlign = 'left';
-    ctx.fillText('0', legendX + padding, boundaryTextY);
+    const maxSimText = formatSimilarity(maxSimilarity.value);
+    ctx.fillText(maxSimText, legendX + padding, boundaryTextY);
     
     // 绘制分界点标签（在每个色块的右边界）
     ctx.textAlign = 'center';
     let currentX = legendX + padding;
     boundaries.forEach((boundary, index) => {
       currentX += colorBarWidth + colorBarGap;
-      const boundaryText = formatDistance(boundary);
+      const boundaryText = formatSimilarity(boundary);
       ctx.fillText(boundaryText, currentX, boundaryTextY);
     });
     
-    // 绘制最远距离标签（在最右边）
-    if (maxDistance.value > 0) {
-      const maxDistanceText = formatDistance(maxDistance.value);
+    // 绘制最小相似度标签（在最右边）
+    if (minSimilarity.value !== undefined) {
+      const minSimText = formatSimilarity(minSimilarity.value);
       const totalBarWidth = legendWidth - padding * 2;
       const rightEdgeX = legendX + padding + totalBarWidth; // 最后一个色块右边界
       ctx.textAlign = 'center';
-      ctx.fillText(maxDistanceText, rightEdgeX, boundaryTextY);
+      ctx.fillText(minSimText, rightEdgeX, boundaryTextY);
     }
   }
 };
@@ -2603,8 +2625,10 @@ canvas {
 }
 
 .legend-boundary-label.legend-start {
-  left: 2px;
-  text-align: left;
+  left: 0;
+  text-align: right;
+  transform: translateX(-50%);
+  padding-right: 2px;
 }
 
 .legend-boundary-label.legend-middle {
