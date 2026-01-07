@@ -184,7 +184,8 @@ export function findPositionWithSpiral(
 }
 
 /**
- * 计算文本的边界框尺寸（估算）
+ * 计算文本的边界框尺寸（精确方法）
+ * 使用 TextMetrics API 获取精确的文本边界框
  * @param {string} text - 文本内容
  * @param {number} fontSize - 字体大小
  * @param {string} fontFamily - 字体族
@@ -192,6 +193,54 @@ export function findPositionWithSpiral(
  * @returns {Object} {width, height}
  */
 export function measureText(text, fontSize, fontFamily = 'Arial', fontWeight = 400) {
+  // 创建临时canvas用于测量
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  
+  const metrics = ctx.measureText(text);
+  
+  // 使用 TextMetrics 的精确边界框信息
+  // actualBoundingBoxLeft/Right 提供水平方向的精确边界
+  // actualBoundingBoxAscent/Descent 提供垂直方向的精确边界
+  let width, height;
+  
+  // 计算宽度：优先使用精确边界框，否则使用标准宽度
+  if (typeof metrics.actualBoundingBoxLeft === 'number' && 
+      typeof metrics.actualBoundingBoxRight === 'number') {
+    // 使用精确的水平边界框
+    const preciseWidth = metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight;
+    // 确保精确宽度不为0或过小（某些字体可能返回0）
+    width = preciseWidth > 0 ? preciseWidth : metrics.width;
+  } else {
+    // 降级到标准宽度
+    width = metrics.width;
+  }
+  
+  // 计算高度：优先使用精确边界框，否则使用估算方法
+  if (typeof metrics.actualBoundingBoxAscent === 'number' && 
+      typeof metrics.actualBoundingBoxDescent === 'number') {
+    // 使用精确的垂直边界框
+    const preciseHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+    // 确保精确高度不为0或过小（某些字体可能返回0）
+    height = preciseHeight > 0 ? preciseHeight : fontSize * 1.2;
+  } else {
+    // 降级到估算方法（字体大小的1.2倍）
+    height = fontSize * 1.2;
+  }
+  
+  return { width, height };
+}
+
+/**
+ * 计算文本的边界框尺寸（估算方法，旧版本）
+ * @param {string} text - 文本内容
+ * @param {number} fontSize - 字体大小
+ * @param {string} fontFamily - 字体族
+ * @param {number} fontWeight - 字体粗细
+ * @returns {Object} {width, height}
+ */
+export function measureText2(text, fontSize, fontFamily = 'Arial', fontWeight = 400) {
   // 创建临时canvas用于测量
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -255,18 +304,28 @@ function layoutWithD3Cloud(
       .random((d) => 0.5)
       .on('end', (words) => {
         // 将 d3-cloud 的结果转换为我们的格式
+        // 重要：为了与其他算法保持一致，使用我们的 measureText 函数重新测量尺寸
+        // 而不是使用 d3-cloud 返回的尺寸（因为 d3-cloud 的测量方式可能不同）
         const layoutResults = words.map((word) => {
           // 将坐标从 d3-cloud 的坐标系转换到我们的坐标系（以 centerX, centerY 为中心）
           const x = centerX + (word.x || 0);
           const y = centerY + (word.y || 0);
+          
+          // 使用我们的 measureText 函数重新测量，确保与其他算法一致
+          const { width, height } = measureText(
+            word.text,
+            word.size,
+            fontSettings.fontFamily,
+            fontSettings.fontWeight
+          );
           
           return {
             poi: word.poi,
             text: word.text,
             x: x,
             y: y,
-            width: word.width || 0,
-            height: word.height || 0,
+            width: width,
+            height: height,
             fontSize: word.size,
             bearing: 0, // d3-cloud 不提供方位角
           };

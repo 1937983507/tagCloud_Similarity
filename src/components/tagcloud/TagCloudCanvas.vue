@@ -224,7 +224,8 @@ import { usePoiStore } from '@/stores/poiStore';
 import { cityNameToPinyin } from '@/utils/cityNameToPinyin';
 import { recordTagCloudGeneration } from '@/utils/statistics';
 import { calculateSimilarities, getSimilarityLevel } from '@/utils/similarity';
-import { layoutTagCloud } from '@/utils/tagCloudLayout';
+import { layoutTagCloud, measureText } from '@/utils/tagCloudLayout';
+import { calculateLayoutMetrics } from '@/utils/layoutMetrics';
 import AMapLoader from '@amap/amap-jsapi-loader';
 import introJs from 'intro.js';
 import 'intro.js/minified/introjs.min.css';
@@ -870,6 +871,9 @@ const renderCloud = async (shouldInitPyramid = false) => {
     }
     
     // 调用布局函数（d3-cloud 返回 Promise，其他算法返回数组）
+    // 记录布局开始时间
+    const layoutStartTime = performance.now();
+    
     const layoutResult = layoutTagCloud(
       poisForLayout,
       center,
@@ -883,6 +887,10 @@ const renderCloud = async (shouldInitPyramid = false) => {
     
     // 处理异步布局（d3-cloud）或同步布局（其他算法）
     const layoutResults = await (layoutResult instanceof Promise ? layoutResult : Promise.resolve(layoutResult));
+    
+    // 记录布局结束时间
+    const layoutEndTime = performance.now();
+    const layoutTime = layoutEndTime - layoutStartTime;
 
     // 在canvas上绘制标签
     layoutResults.forEach((result) => {
@@ -923,6 +931,18 @@ const renderCloud = async (shouldInitPyramid = false) => {
     // 触发金字塔更新，确保距离标签能正确显示
     pyramidUpdateTrigger.value++;
 
+    // 计算布局指标
+    const metrics = calculateLayoutMetrics(
+      layoutResults,
+      center,
+      centerX,
+      centerY,
+      layoutTime
+    );
+    
+    // 将指标存储到store
+    poiStore.setLayoutMetrics(metrics);
+
     // 记录统计信息
     if (shouldInitPyramid) {
       recordTagCloudGeneration({
@@ -932,7 +952,7 @@ const renderCloud = async (shouldInitPyramid = false) => {
       });
     }
 
-    console.log('标签云渲染完成');
+    console.log('标签云渲染完成', metrics);
   } catch (error) {
     console.error('渲染标签云失败:', error);
     alert('生成标签云失败: ' + (error.message || '未知错误'));
@@ -1299,12 +1319,14 @@ const drawCenter = (centerX, centerY, centerPoi) => {
   // 中心标签字号：比第1级字号大一点（第1级是fontSizes[0]）
   const fontSizes = poiStore.fontSettings.fontSizes;
   const firstLevelFontSize = fontSizes && fontSizes.length > 0 ? fontSizes[0] : 64;
-  const centerFontSize = (firstLevelFontSize * 1.2) * resolutionScale; // 比第1级大20%
+  const centerFontSizeLogical = firstLevelFontSize * 1.2; // 逻辑字号（不包含 resolutionScale）
+  const centerFontSize = centerFontSizeLogical * resolutionScale; // 实际绘制字号（包含 resolutionScale）
+  
   const centerText = new Textbox(centerLabelText, {
     left: centerX,
     top: centerY,
     fill: 'rgb(255, 255, 255)',
-    fontSize: centerFontSize,
+    fontSize: centerFontSize, // 绘制时使用包含 resolutionScale 的字号
     strokeWidth: 5,
     fontWeight: 1000,
     stroke: 'rgba(255,255,255,0.7)',
@@ -1316,9 +1338,15 @@ const drawCenter = (centerX, centerY, centerPoi) => {
   });
   canvasInstance.add(centerText);
   
-  // 计算中心标签的尺寸并返回
-  const centerTextWidth = centerText.width || centerLabelText.length * centerFontSize * 0.6;
-  const centerTextHeight = centerText.height || centerFontSize * 1.2;
+  // 使用统一的 measureText 函数计算中心标签的尺寸
+  // 注意：为了与布局算法保持一致，使用逻辑字号（不包含 resolutionScale）
+  // 这样返回的 centerLabelRect 尺寸与其他标签的尺寸在同一坐标系中
+  const { width: centerTextWidth, height: centerTextHeight } = measureText(
+    centerLabelText,
+    centerFontSizeLogical, // 使用逻辑字号，与布局算法保持一致
+    'Comic Sans', // 中心标签使用的字体
+    1000 // 中心标签使用的字体粗细
+  );
   
   return {
     x: centerX - centerTextWidth / 2,

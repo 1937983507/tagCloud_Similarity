@@ -36,6 +36,7 @@ export const usePoiStore = defineStore('poiStore', {
     algorithmSettings: {
       layoutAlgorithm: 'multi-angle-radial', // 'multi-angle-radial' | 'single-angle-radial' | 'archimedean-spiral'
     },
+    layoutMetrics: null, // 布局算法指标
   }),
   getters: {
     totalCount: (state) => state.poiList.length,
@@ -334,6 +335,9 @@ export const usePoiStore = defineStore('poiStore', {
         ...this.algorithmSettings,
         ...payload,
       };
+    },
+    setLayoutMetrics(metrics) {
+      this.layoutMetrics = metrics;
     },
     setSelectionContext(context) {
       this.selectionCenter = context?.center ?? null;
