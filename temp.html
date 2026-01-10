@@ -105,6 +105,90 @@
             margin-top: 10px;
             font-style: italic;
         }
+        
+        /* 网格矩阵图表样式 */
+        .matrix-chart {
+            width: 100%;
+            margin: 20px 0;
+            border-collapse: collapse;
+            font-size: 12pt;
+            border: none;
+        }
+        
+        .matrix-chart th,
+        .matrix-chart td {
+            border: none;
+            padding: 10px;
+            text-align: center;
+            vertical-align: middle;
+            width: 150px;
+        }
+        
+        .matrix-chart th {
+            background-color: transparent;
+            font-weight: bold;
+            font-size: 13pt;
+        }
+        
+        .matrix-chart th:first-child {
+            text-align: left;
+            padding-left: 15px;
+            width: 150px;
+        }
+        
+        .matrix-chart td:first-child {
+            text-align: left;
+            padding-left: 15px;
+            font-weight: 500;
+            background-color: transparent;
+        }
+        
+        .matrix-chart td {
+            position: relative;
+            height: 60px;
+            padding: 10px;
+            width: 150px;
+            vertical-align: middle;
+        }
+        
+        .matrix-chart td:first-child {
+            padding: 10px;
+            padding-left: 15px;
+        }
+        
+        .bar-cell {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        
+        .bar-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+        }
+        
+        .bar-fill {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            background-color: #9BB2D1;
+            transition: width 0.3s ease;
+        }
+        
+        .bar-value {
+            display: none;
+        }
+        
+        .bar-container:hover .bar-fill {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
@@ -163,6 +247,125 @@
                 <canvas id="radarChart"></canvas>
             </div>
             <div class="note">注：雷达图展示1000个地点时各算法的综合性能，各指标已归一化处理。</div>
+        </div>
+        
+        <!-- 归一化得分横向柱状图 -->
+        <div class="chart-container">
+            <div class="chart-title">图7. 归一化后3种算法在5项指标中的得分</div>
+            <table class="matrix-chart" id="normalizedBarChart">
+                <thead>
+                    <tr>
+                        <th>算法</th>
+                        <th>空间紧凑度</th>
+                        <th>方向保持度</th>
+                        <th>相关性强度</th>
+                        <th>布局均匀度</th>
+                        <th>计算效率</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr data-algorithm="traditional">
+                        <td>传统螺旋布局</td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr data-algorithm="single">
+                        <td>单角度径向移位</td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr data-algorithm="multi">
+                        <td>多角度径向移位</td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                        <td class="bar-cell">
+                            <div class="bar-container">
+                                <div class="bar-fill" data-value="0"></div>
+                                <span class="bar-value">0.000</span>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="note">注：图表展示1000个地点时各算法的归一化得分，柱状条越长表示性能越好。各指标已归一化到0-1范围。</div>
         </div>
     </div>
 
@@ -807,6 +1010,66 @@
                         }
                     }
                 }
+            }
+        });
+        
+        // 7. 归一化得分横向柱状图（1000个地点）- 网格矩阵形式
+        const matrixTable = document.getElementById('normalizedBarChart');
+        const matrixData = {
+            traditional: [
+                radarData.traditional.compactness,
+                radarData.traditional.mae,
+                radarData.traditional.correlation,
+                radarData.traditional.uniformity,
+                radarData.traditional.time
+            ],
+            single: [
+                radarData.single.compactness,
+                radarData.single.mae,
+                radarData.single.correlation,
+                radarData.single.uniformity,
+                radarData.single.time
+            ],
+            multi: [
+                radarData.multi.compactness,
+                radarData.multi.mae,
+                radarData.multi.correlation,
+                radarData.multi.uniformity,
+                radarData.multi.time
+            ]
+        };
+        
+        // 更新每个单元格的柱状条
+        Object.keys(matrixData).forEach(algorithm => {
+            const row = matrixTable.querySelector(`tr[data-algorithm="${algorithm}"]`);
+            if (row) {
+                const cells = row.querySelectorAll('.bar-fill');
+                const values = row.querySelectorAll('.bar-value');
+                matrixData[algorithm].forEach((value, index) => {
+                    if (cells[index] && values[index]) {
+                        const percentage = Math.max(0, Math.min(100, value * 100));
+                        cells[index].style.width = percentage + '%';
+                        cells[index].setAttribute('data-value', value.toFixed(3));
+                        values[index].textContent = value.toFixed(3);
+                        
+                        // 如果柱状条太短（小于20%），将数值显示在柱状条右侧外部
+                        if (percentage < 20) {
+                            const barContainer = cells[index].parentElement;
+                            values[index].style.left = percentage + '%';
+                            values[index].style.right = 'auto';
+                            values[index].style.transform = 'translate(5px, -50%)';
+                            values[index].style.color = '#333';
+                            values[index].style.textShadow = 'none';
+                        } else {
+                            // 数值显示在柱状条中心
+                            values[index].style.left = (percentage / 2) + '%';
+                            values[index].style.right = 'auto';
+                            values[index].style.transform = 'translate(-50%, -50%)';
+                            values[index].style.color = '#fff';
+                            values[index].style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.5)';
+                        }
+                    }
+                });
             }
         });
     </script>
