@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>标签云布局算法性能对比分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Times New Roman', 'SimSun', serif;
+            background: #ffffff;
+            color: #000000;
+            padding: 40px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            font-size: 28pt;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 30px;
+            color: #000000;
+        }
+        
+        .chart-container {
+            background: #ffffff;
+            margin-bottom: 50px;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            page-break-inside: avoid;
+        }
+        
+        .chart-title {
+            font-size: 16pt;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+            color: #000000;
+        }
+        
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+            margin: 0 auto;
+        }
+        
+        .chart-wrapper.large {
+            height: 500px;
+        }
+        
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11pt;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border: 1px solid #333;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 30px 0;
+            font-size: 10pt;
+        }
+        
+        .data-table th,
+        .data-table td {
+            border: 1px solid #333;
+            padding: 8px;
+            text-align: center;
+        }
+        
+        .data-table th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        
+        .note {
+            font-size: 11pt;
+            color: #666;
+            margin-top: 10px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>标签云布局算法性能对比分析</h1>
+        
+        <!-- 空间紧凑度对比 -->
+        <div class="chart-container">
+            <div class="chart-title">图1. 空间紧凑度 (CI) 对比</div>
+            <div class="chart-wrapper">
+                <canvas id="compactnessChart"></canvas>
+            </div>
+            <div class="note">注：空间紧凑度定义为所有标签面积总和与最小外接矩形面积的比值，值越大表示布局越紧凑。</div>
+        </div>
+        
+        <!-- 方向保持度对比 -->
+        <div class="chart-container">
+            <div class="chart-title">图2. 方向保持度 (OR) 对比</div>
+            <div class="chart-wrapper">
+                <canvas id="orientationChart"></canvas>
+            </div>
+            <div class="note">注：方向保持度以平均方向偏移 (MAE) 和最大方向偏移 (MaxE) 衡量，值越小表示方向保持越好。</div>
+        </div>
+        
+        <!-- 距离-相似度相关性对比 -->
+        <div class="chart-container">
+            <div class="chart-title">图3. 径向距离与相似度相关性 (RDSC) 对比</div>
+            <div class="chart-wrapper">
+                <canvas id="correlationChart"></canvas>
+            </div>
+            <div class="note">注：RDSC 采用皮尔逊相关系数，负值表示距离中心越远相似度越低。</div>
+        </div>
+        
+        <!-- 布局均匀度对比 -->
+        <div class="chart-container">
+            <div class="chart-title">图4. 布局均匀度 (LU) 对比</div>
+            <div class="chart-wrapper">
+                <canvas id="uniformityChart"></canvas>
+            </div>
+            <div class="note">注：布局均匀度通过36个扇形区间内标签数量的变异系数 (CV) 衡量，值越小表示分布越均匀。</div>
+        </div>
+        
+        <!-- 计算耗时对比 -->
+        <div class="chart-container">
+            <div class="chart-title">图5. 计算耗时对比</div>
+            <div class="chart-wrapper large">
+                <canvas id="timeChart"></canvas>
+            </div>
+            <div class="note">注：计算耗时仅统计布局算法执行时间，不包括数据准备和相似度计算时间。</div>
+        </div>
+        
+        <!-- 综合性能雷达图 -->
+        <div class="chart-container">
+            <div class="chart-title">图6. 综合性能雷达图 (1000个地点)</div>
+            <div class="chart-wrapper large">
+                <canvas id="radarChart"></canvas>
+            </div>
+            <div class="note">注：雷达图展示1000个地点时各算法的综合性能，各指标已归一化处理。</div>
+        </div>
+    </div>
+
+    <script>
+        // 论文风格的配色方案（使用颜色区分不同算法）
+        const colors = {
+            traditional: {
+                border: '#1f77b4',  // 蓝色
+                background: 'rgba(31, 119, 180, 0.15)',
+                pattern: 'rgba(31, 119, 180, 0.3)'
+            },
+            single: {
+                border: '#2ca02c',  // 绿色
+                background: 'rgba(44, 160, 44, 0.15)',
+                pattern: 'rgba(44, 160, 44, 0.3)'
+            },
+            multi: {
+                border: '#d62728',  // 红色
+                background: 'rgba(214, 39, 40, 0.15)',
+                pattern: 'rgba(214, 39, 40, 0.3)'
+            }
+        };
+
+        // 数据
+        const dataPoints = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000];
+        
+        const data = {
+            traditional: {
+                compactness: [0.418, 0.3947, 0.3927, 0.3981, 0.3865, 0.3803, 0.4016, 0.3904, 0.3815, 0.3981, 0.3925, 0.3903, 0.3892, 0.3918, 0.3943, 0.3807, 0.3876, 0.3793, 0.3808, 0.3857],
+                mae: [84.83, 85.17, 91.36, 89.93, 89.66, 87.98, 90.68, 91, 90.19, 90.53, 88.91, 91.09, 90.46, 86.43, 91.48, 89.62, 91.29, 89.58, 90.5, 89.36],
+                maxE: [179.06, 178.97, 179.84, 179.87, 179.88, 179.61, 178.82, 179.85, 179.79, 179.86, 179.96, 179.96, 179.9, 179.74, 179.99, 179.93, 179.77, 179.98, 179.97, 179.88],
+                correlation: [-0.6607, -0.8039, -0.8343, -0.8469, -0.8291, -0.8431, -0.8328, -0.8323, -0.8394, -0.8541, -0.8539, -0.8428, -0.8577, -0.8552, -0.8577, -0.8635, -0.8703, -0.8751, -0.8726, -0.8747],
+                uniformity: [0.6951, 0.4252, 0.4096, 0.3085, 0.3088, 0.2778, 0.2719, 0.2801, 0.2542, 0.2415, 0.2286, 0.2279, 0.2392, 0.2296, 0.228, 0.2333, 0.2142, 0.2257, 0.2282, 0.2157],
+                time: [220, 346.5, 576.6, 760.4, 994.3, 1232.3, 1493.5, 1731.4, 2793.5, 3031.6, 3628.1, 4049.3, 4196.6, 4627.3, 5265.7, 5354.1, 6129.5, 6524.5, 7065.3, 7526.6]
+            },
+            single: {
+                compactness: [0.2168, 0.2642, 0.2746, 0.2731, 0.2812, 0.2691, 0.2199, 0.1406, 0.1422, 0.1563, 0.1369, 0.1359, 0.1413, 0.1505, 0.1282, 0.1109, 0.1099, 0.1096, 0.1126, 0.096],
+                mae: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                maxE: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                correlation: [-0.5093, -0.541, -0.5401, -0.5317, -0.5346, -0.5817, -0.5045, -0.4405, -0.4442, -0.4623, -0.4194, -0.4091, -0.4171, -0.4353, -0.4214, -0.388, -0.3863, -0.3955, -0.4069, -0.4081],
+                uniformity: [1.082, 0.9209, 0.7694, 0.619, 0.4894, 0.4133, 0.6831, 0.8523, 0.8033, 0.7908, 0.9041, 0.8665, 0.8098, 0.794, 0.8632, 0.9679, 0.9761, 0.9439, 0.9393, 0.9406],
+                time: [4.6, 10.3, 18.1, 24.9, 37.8, 59.3, 61.8, 88.9, 151.2, 196.9, 236.6, 335.5, 345.5, 398.1, 502.7, 595.7, 709.8, 754.3, 863.1, 990.7]
+            },
+            multi: {
+                compactness: [0.3824, 0.3858, 0.3741, 0.3823, 0.3971, 0.4141, 0.4009, 0.4095, 0.4036, 0.3823, 0.3633, 0.3634, 0.373, 0.3838, 0.3891, 0.3542, 0.3585, 0.3625, 0.3605, 0.365],
+                mae: [11.46, 10.98, 11.27, 11.08, 10.62, 10.53, 10.94, 10.83, 11.17, 10.96, 10.96, 11.06, 11.06, 11.15, 11.03, 10.78, 11.01, 10.74, 10.71, 10.74],
+                maxE: [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15],
+                correlation: [-0.634, -0.6877, -0.6713, -0.6591, -0.7045, -0.7293, -0.7131, -0.6706, -0.6978, -0.6913, -0.6351, -0.6467, -0.6694, -0.6799, -0.6858, -0.665, -0.6717, -0.6822, -0.6903, -0.7044],
+                uniformity: [0.7087, 0.6501, 0.5614, 0.3661, 0.2719, 0.2014, 0.3075, 0.3709, 0.3474, 0.3364, 0.4328, 0.4064, 0.3492, 0.333, 0.3364, 0.3637, 0.3701, 0.3619, 0.3649, 0.3461],
+                time: [5.2, 14.7, 28.3, 43.3, 66.91, 97.3, 109.8, 157.4, 257.8, 366.7, 461.5, 531.2, 604.6, 703.4, 841.9, 978.5, 1141.6, 1275.7, 1451.2, 1618.87]
+            }
+        };
+
+        // 通用图表配置
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        font: {
+                            family: 'Times New Roman',
+                            size: 14
+                        },
+                        usePointStyle: true,
+                        padding: 18
+                    }
+                },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleFont: {
+                        family: 'Times New Roman',
+                        size: 14
+                    },
+                    bodyFont: {
+                        family: 'Times New Roman',
+                        size: 13
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: '地点数量',
+                        font: {
+                            family: 'Times New Roman',
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    },
+                    ticks: {
+                        font: {
+                            family: 'Times New Roman',
+                            size: 13
+                        }
+                    },
+                    grid: {
+                        color: '#e0e0e0',
+                        lineWidth: 1
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        font: {
+                            family: 'Times New Roman',
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    },
+                    ticks: {
+                        font: {
+                            family: 'Times New Roman',
+                            size: 13
+                        }
+                    },
+                    grid: {
+                        color: '#e0e0e0',
+                        lineWidth: 1
+                    }
+                }
+            }
+        };
+
+        // 1. 空间紧凑度图表
+        const compactnessCtx = document.getElementById('compactnessChart').getContext('2d');
+        new Chart(compactnessCtx, {
+            type: 'line',
+            data: {
+                labels: dataPoints,
+                datasets: [
+                    {
+                        label: '传统螺旋布局',
+                        data: data.traditional.compactness,
+                        borderColor: colors.traditional.border,
+                        backgroundColor: colors.traditional.background,
+                        borderWidth: 2.5,
+                        pointRadius: 5,
+                        pointStyle: 'circle',
+                        tension: 0.1
+                    },
+                    {
+                        label: '单角度径向移位',
+                        data: data.single.compactness,
+                        borderColor: colors.single.border,
+                        backgroundColor: colors.single.background,
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointStyle: 'rect',
+                        tension: 0.1
+                    },
+                    {
+                        label: '多角度径向移位',
+                        data: data.multi.compactness,
+                        borderColor: colors.multi.border,
+                        backgroundColor: colors.multi.background,
+                        borderWidth: 2,
+                        borderDash: [10, 5],
+                        pointRadius: 4,
+                        pointStyle: 'triangle',
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        ...commonOptions.scales.y,
+                        title: {
+                            ...commonOptions.scales.y.title,
+                            text: '空间紧凑度 (CI)'
+                        },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // 2. 方向保持度图表（双Y轴）
+        const orientationCtx = document.getElementById('orientationChart').getContext('2d');
+        new Chart(orientationCtx, {
+            type: 'line',
+            data: {
+                labels: dataPoints,
+                datasets: [
+                    {
+                        label: '传统螺旋布局 - MAE',
+                        data: data.traditional.mae,
+                        borderColor: colors.traditional.border,
+                        backgroundColor: colors.traditional.background,
+                        borderWidth: 2.5,
+                        pointRadius: 5,
+                        pointStyle: 'circle',
+                        yAxisID: 'y',
+                        tension: 0.1
+                    },
+                    {
+                        label: '传统螺旋布局 - MaxE',
+                        data: data.traditional.maxE,
+                        borderColor: colors.traditional.border,
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        borderDash: [5, 5],
+                        pointRadius: 5,
+                        pointStyle: 'circle',
+                        yAxisID: 'y',
+                        tension: 0.1
+                    },
+                    {
+                        label: '多角度径向移位 - MAE',
+                        data: data.multi.mae,
+                        borderColor: colors.multi.border,
+                        backgroundColor: colors.multi.background,
+                        borderWidth: 2.5,
+                        borderDash: [10, 5],
+                        pointRadius: 5,
+                        pointStyle: 'triangle',
+                        yAxisID: 'y',
+                        tension: 0.1
+                    },
+                    {
+                        label: '多角度径向移位 - MaxE',
+                        data: data.multi.maxE,
+                        borderColor: colors.multi.border,
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        borderDash: [15, 5],
+                        pointRadius: 5,
+                        pointStyle: 'triangle',
+                        yAxisID: 'y',
+                        tension: 0.1
+                    },
+                    {
+                        label: '单角度径向移位 - MAE',
+                        data: data.single.mae,
+                        borderColor: colors.single.border,
+                        backgroundColor: colors.single.background,
+                        borderWidth: 2.5,
+                        borderDash: [5, 5],
+                        pointRadius: 5,
+                        pointStyle: 'rect',
+                        yAxisID: 'y',
+                        tension: 0.1
+                    },
+                    {
+                        label: '单角度径向移位 - MaxE',
+                        data: data.single.maxE,
+                        borderColor: colors.single.border,
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        borderDash: [10, 5],
+                        pointRadius: 5,
+                        pointStyle: 'rect',
+                        yAxisID: 'y',
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        ...commonOptions.scales.y,
+                        title: {
+                            ...commonOptions.scales.y.title,
+                            text: '方向偏移 (度)'
+                        },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // 3. 相关性图表
+        const correlationCtx = document.getElementById('correlationChart').getContext('2d');
+        new Chart(correlationCtx, {
+            type: 'line',
+            data: {
+                labels: dataPoints,
+                datasets: [
+                    {
+                        label: '传统螺旋布局',
+                        data: data.traditional.correlation,
+                        borderColor: colors.traditional.border,
+                        backgroundColor: colors.traditional.background,
+                        borderWidth: 2.5,
+                        pointRadius: 5,
+                        pointStyle: 'circle',
+                        tension: 0.1
+                    },
+                    {
+                        label: '单角度径向移位',
+                        data: data.single.correlation,
+                        borderColor: colors.single.border,
+                        backgroundColor: colors.single.background,
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointStyle: 'rect',
+                        tension: 0.1
+                    },
+                    {
+                        label: '多角度径向移位',
+                        data: data.multi.correlation,
+                        borderColor: colors.multi.border,
+                        backgroundColor: colors.multi.background,
+                        borderWidth: 2,
+                        borderDash: [10, 5],
+                        pointRadius: 4,
+                        pointStyle: 'triangle',
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        ...commonOptions.scales.y,
+                        title: {
+                            ...commonOptions.scales.y.title,
+                            text: '皮尔逊相关系数'
+                        },
+                        min: -1,
+                        max: 0
+                    }
+                }
+            }
+        });
+
+        // 4. 布局均匀度图表
+        const uniformityCtx = document.getElementById('uniformityChart').getContext('2d');
+        new Chart(uniformityCtx, {
+            type: 'line',
+            data: {
+                labels: dataPoints,
+                datasets: [
+                    {
+                        label: '传统螺旋布局',
+                        data: data.traditional.uniformity,
+                        borderColor: colors.traditional.border,
+                        backgroundColor: colors.traditional.background,
+                        borderWidth: 2.5,
+                        pointRadius: 5,
+                        pointStyle: 'circle',
+                        tension: 0.1
+                    },
+                    {
+                        label: '单角度径向移位',
+                        data: data.single.uniformity,
+                        borderColor: colors.single.border,
+                        backgroundColor: colors.single.background,
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointStyle: 'rect',
+                        tension: 0.1
+                    },
+                    {
+                        label: '多角度径向移位',
+                        data: data.multi.uniformity,
+                        borderColor: colors.multi.border,
+                        backgroundColor: colors.multi.background,
+                        borderWidth: 2,
+                        borderDash: [10, 5],
+                        pointRadius: 4,
+                        pointStyle: 'triangle',
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        ...commonOptions.scales.y,
+                        title: {
+                            ...commonOptions.scales.y.title,
+                            text: '布局均匀度 (LU, CV)'
+                        },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // 5. 计算耗时图表
+        const timeCtx = document.getElementById('timeChart').getContext('2d');
+        new Chart(timeCtx, {
+            type: 'line',
+            data: {
+                labels: dataPoints,
+                datasets: [
+                    {
+                        label: '传统螺旋布局',
+                        data: data.traditional.time,
+                        borderColor: colors.traditional.border,
+                        backgroundColor: colors.traditional.background,
+                        borderWidth: 2.5,
+                        pointRadius: 5,
+                        pointStyle: 'circle',
+                        tension: 0.1
+                    },
+                    {
+                        label: '单角度径向移位',
+                        data: data.single.time,
+                        borderColor: colors.single.border,
+                        backgroundColor: colors.single.background,
+                        borderWidth: 2.5,
+                        borderDash: [5, 5],
+                        pointRadius: 5,
+                        pointStyle: 'rect',
+                        tension: 0.1
+                    },
+                    {
+                        label: '多角度径向移位',
+                        data: data.multi.time,
+                        borderColor: colors.multi.border,
+                        backgroundColor: colors.multi.background,
+                        borderWidth: 2.5,
+                        borderDash: [10, 5],
+                        pointRadius: 5,
+                        pointStyle: 'triangle',
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        ...commonOptions.scales.y,
+                        title: {
+                            ...commonOptions.scales.y.title,
+                            text: '计算耗时 (ms)'
+                        },
+                        beginAtZero: true,
+                        ticks: {
+                            ...commonOptions.scales.y.ticks,
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // 6. 综合性能雷达图（1000个地点）
+        const radarCtx = document.getElementById('radarChart').getContext('2d');
+        
+        // 归一化函数
+        function normalize(value, min, max, inverse = false) {
+            // 避免除零
+            if (max === min) {
+                return 0.5; // 如果范围为零，返回中间值
+            }
+            
+            if (inverse) {
+                // 对于越小越好的指标（MAE, MaxE, Uniformity, Time）
+                // 值越小，归一化结果越大（接近1）
+                // 值越大，归一化结果越小（接近0）
+                return 1 - (value - min) / (max - min);
+            } else {
+                // 对于越大越好的指标（Compactness, Correlation绝对值）
+                // 值越大，归一化结果越大（接近1）
+                // 值越小，归一化结果越小（接近0）
+                return (value - min) / (max - min);
+            }
+        }
+        
+        // 1000个地点的数据索引为9
+        const idx = 9;
+        // 全局数据范围（用于归一化）
+        const globalRanges = {
+            compactness: { min: 0.096, max: 0.418 },
+            mae: { min: 0, max: 91.48 },
+            correlation: { min: 0.3863, max: 0.8751 }, // 绝对值范围
+            uniformity: { min: 0.2014, max: 1.082 },
+            time: { min: 4.6, max: 7526.6 }
+        };
+        
+        const radarData = {
+            traditional: {
+                compactness: normalize(data.traditional.compactness[idx], globalRanges.compactness.min, globalRanges.compactness.max, false),
+                mae: normalize(data.traditional.mae[idx], globalRanges.mae.min, globalRanges.mae.max, true),
+                correlation: normalize(Math.abs(data.traditional.correlation[idx]), globalRanges.correlation.min, globalRanges.correlation.max, false),
+                uniformity: normalize(data.traditional.uniformity[idx], globalRanges.uniformity.min, globalRanges.uniformity.max, true),
+                time: normalize(data.traditional.time[idx], globalRanges.time.min, globalRanges.time.max, true)
+            },
+            single: {
+                compactness: normalize(data.single.compactness[idx], globalRanges.compactness.min, globalRanges.compactness.max, false),
+                mae: normalize(data.single.mae[idx], globalRanges.mae.min, globalRanges.mae.max, true), // MAE=0时，归一化为1
+                correlation: normalize(Math.abs(data.single.correlation[idx]), globalRanges.correlation.min, globalRanges.correlation.max, false),
+                uniformity: normalize(data.single.uniformity[idx], globalRanges.uniformity.min, globalRanges.uniformity.max, true),
+                time: normalize(data.single.time[idx], globalRanges.time.min, globalRanges.time.max, true)
+            },
+            multi: {
+                compactness: normalize(data.multi.compactness[idx], globalRanges.compactness.min, globalRanges.compactness.max, false),
+                mae: normalize(data.multi.mae[idx], globalRanges.mae.min, globalRanges.mae.max, true),
+                correlation: normalize(Math.abs(data.multi.correlation[idx]), globalRanges.correlation.min, globalRanges.correlation.max, false),
+                uniformity: normalize(data.multi.uniformity[idx], globalRanges.uniformity.min, globalRanges.uniformity.max, true),
+                time: normalize(data.multi.time[idx], globalRanges.time.min, globalRanges.time.max, true)
+            }
+        };
+        
+        // 调试输出（可在浏览器控制台查看）
+        console.log('雷达图归一化结果（1000个地点）:');
+        console.log('传统螺旋布局:', {
+            compactness: radarData.traditional.compactness.toFixed(3),
+            mae: radarData.traditional.mae.toFixed(3),
+            correlation: radarData.traditional.correlation.toFixed(3),
+            uniformity: radarData.traditional.uniformity.toFixed(3),
+            time: radarData.traditional.time.toFixed(3)
+        });
+        console.log('单角度径向移位:', {
+            compactness: radarData.single.compactness.toFixed(3),
+            mae: radarData.single.mae.toFixed(3),
+            correlation: radarData.single.correlation.toFixed(3),
+            uniformity: radarData.single.uniformity.toFixed(3),
+            time: radarData.single.time.toFixed(3)
+        });
+        console.log('多角度径向移位:', {
+            compactness: radarData.multi.compactness.toFixed(3),
+            mae: radarData.multi.mae.toFixed(3),
+            correlation: radarData.multi.correlation.toFixed(3),
+            uniformity: radarData.multi.uniformity.toFixed(3),
+            time: radarData.multi.time.toFixed(3)
+        });
+        
+        new Chart(radarCtx, {
+            type: 'radar',
+            data: {
+                labels: ['空间紧凑度', '方向保持度', '相关性强度', '布局均匀度', '计算效率'],
+                datasets: [
+                    {
+                        label: '传统螺旋布局',
+                        data: [
+                            radarData.traditional.compactness,
+                            radarData.traditional.mae,
+                            radarData.traditional.correlation,
+                            radarData.traditional.uniformity,
+                            radarData.traditional.time
+                        ],
+                        borderColor: colors.traditional.border,
+                        backgroundColor: colors.traditional.pattern,
+                        borderWidth: 2.5,
+                        pointRadius: 4
+                    },
+                    {
+                        label: '单角度径向移位',
+                        data: [
+                            radarData.single.compactness,
+                            radarData.single.mae,
+                            radarData.single.correlation,
+                            radarData.single.uniformity,
+                            radarData.single.time
+                        ],
+                        borderColor: colors.single.border,
+                        backgroundColor: colors.single.pattern,
+                        borderWidth: 2.5,
+                        borderDash: [5, 5],
+                        pointRadius: 4
+                    },
+                    {
+                        label: '多角度径向移位',
+                        data: [
+                            radarData.multi.compactness,
+                            radarData.multi.mae,
+                            radarData.multi.correlation,
+                            radarData.multi.uniformity,
+                            radarData.multi.time
+                        ],
+                        borderColor: colors.multi.border,
+                        backgroundColor: colors.multi.pattern,
+                        borderWidth: 2.5,
+                        borderDash: [10, 5],
+                        pointRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            font: {
+                                family: 'Times New Roman',
+                                size: 14
+                            },
+                            usePointStyle: true,
+                            padding: 18
+                        }
+                    },
+                    tooltip: {
+                        enabled: true,
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        titleFont: {
+                            family: 'Times New Roman',
+                            size: 14
+                        },
+                        bodyFont: {
+                            family: 'Times New Roman',
+                            size: 13
+                        }
+                    }
+                },
+                scales: {
+                    r: {
+                        beginAtZero: true,
+                        max: 1,
+                        ticks: {
+                            font: {
+                                family: 'Times New Roman',
+                                size: 12
+                            },
+                            stepSize: 0.2
+                        },
+                        pointLabels: {
+                            font: {
+                                family: 'Times New Roman',
+                                size: 13
+                            }
+                        },
+                        grid: {
+                            color: '#e0e0e0',
+                            lineWidth: 1
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
