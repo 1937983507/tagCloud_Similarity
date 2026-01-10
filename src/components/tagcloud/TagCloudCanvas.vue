@@ -1284,22 +1284,22 @@ const findCenterPoi = (center, sourceList) => {
     return null;
   }
   
-  let nearestPoi = null;
-  let minDistance = Infinity;
-  
-  for (const poi of sourceList) {
-    const distance = calculateDistance(
-      center.lat,
-      center.lng,
-      poi.lat,
-      poi.lng,
-    );
-    if (distance < minDistance) {
-      minDistance = distance;
-      nearestPoi = poi;
+    let nearestPoi = null;
+    let minDistance = Infinity;
+    
+    for (const poi of sourceList) {
+      const distance = calculateDistance(
+        center.lat,
+        center.lng,
+        poi.lat,
+        poi.lng,
+      );
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestPoi = poi;
+      }
     }
-  }
-  
+    
   return nearestPoi;
 };
 
@@ -1311,7 +1311,7 @@ const drawCenter = (centerX, centerY, centerPoi) => {
   let centerLabelText;
   if (centerPoi) {
     centerLabelText = getPoiDisplayName(centerPoi);
-  } else {
+    } else {
     // 如果没有中心POI，使用默认文本
     centerLabelText = language === 'en' ? 'Center' : '中心位置';
   }
@@ -2383,7 +2383,7 @@ watch(
   },
 );
 
-
+  
 
 onBeforeUnmount(() => {
   if (resizeObserver && wrapperRef.value) {

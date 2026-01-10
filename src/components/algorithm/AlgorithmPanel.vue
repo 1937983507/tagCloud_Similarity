@@ -140,13 +140,7 @@ const formatTime = (ms) => {
   if (ms === null || ms === undefined || isNaN(ms)) {
     return 'N/A';
   }
-  if (ms < 1) {
-    return `${(ms * 1000).toFixed(2)} μs`;
-  } else if (ms < 1000) {
-    return `${ms.toFixed(2)} ms`;
-  } else {
-    return `${(ms / 1000).toFixed(2)} s`;
-  }
+  return `${Number(ms).toFixed(1)} ms`;
 };
 </script>
 
