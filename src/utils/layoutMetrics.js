@@ -192,18 +192,18 @@ export function calculateLayoutMetrics(layoutResults, center, centerX, centerY, 
     maxY = Math.max(maxY, bottom);
   });
   
-  // 输出前5个标签的尺寸信息用于调试
-  if (labelSizes.length > 0) {
-    console.log("前5个标签的尺寸信息：", labelSizes.slice(0, 5));
-    console.log("标签数量：", labelSizes.length);
-    console.log("平均标签面积：", totalLabelArea / labelSizes.length);
-  }
+  // // 输出前5个标签的尺寸信息用于调试
+  // if (labelSizes.length > 0) {
+  //   console.log("前5个标签的尺寸信息：", labelSizes.slice(0, 5));
+  //   console.log("标签数量：", labelSizes.length);
+  //   console.log("平均标签面积：", totalLabelArea / labelSizes.length);
+  // }
 
-  console.log("当前画布的坐标：", minX, minY, maxX, maxY);
+  // console.log("当前画布的坐标：", minX, minY, maxX, maxY);
 
   const boundingRectArea = (maxX - minX) * (maxY - minY);
-  console.log("当前画布的面积：", boundingRectArea)
-  console.log("当前标签的总面积：", totalLabelArea)
+  // console.log("当前画布的面积：", boundingRectArea)
+  // console.log("当前标签的总面积：", totalLabelArea)
   
   const compactnessIndex = boundingRectArea > 0 ? totalLabelArea / boundingRectArea : 0;
 

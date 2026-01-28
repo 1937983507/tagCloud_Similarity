@@ -456,10 +456,10 @@ export function layoutTagCloud(
       bearing: bearing,
     });
     
-    // 显示进度
-    if ((i + 1) % 10 === 0 || i === pois.length - 1) {
-      console.log(`布局进度: ${i + 1}/${pois.length}`);
-    }
+    // // 显示进度
+    // if ((i + 1) % 10 === 0 || i === pois.length - 1) {
+    //   console.log(`布局进度: ${i + 1}/${pois.length}`);
+    // }
   }
 
   console.log(`布局完成，成功放置 ${layoutResults.length}/${pois.length} 个标签`);

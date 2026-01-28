@@ -62,7 +62,7 @@ export async function getBatchEmbeddings(texts, onProgress = null) {
     }
     
     // 显示进度
-    console.log(`嵌入向量计算进度: ${current}/${total}`);
+    // console.log(`嵌入向量计算进度: ${current}/${total}`);
   }
   
   return embeddings;

@@ -37,6 +37,7 @@ import {
   Collection,
   EditPen,
   Operation,
+  DataAnalysis,
 } from '@element-plus/icons-vue';
 
 const mainMenu = [
@@ -44,6 +45,7 @@ const mainMenu = [
   { key: 'algorithm', label: '算法', icon: Operation },
   { key: 'typeface', label: '字体', icon: EditPen },
   { key: 'color', label: '配色', icon: BrushFilled },
+  { key: 'batchtest', label: '批量测试', icon: DataAnalysis },
 ];
 
 const handleShortcutClick = () => {
