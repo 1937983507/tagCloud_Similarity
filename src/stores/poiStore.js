@@ -33,6 +33,10 @@ export const usePoiStore = defineStore('poiStore', {
       discreteMethod: 'quantile',
       discreteCount: 5,
     },
+    algorithmSettings: {
+      layoutAlgorithm: 'multi-angle-radial', // 'multi-angle-radial' | 'single-angle-radial' | 'archimedean-spiral'
+    },
+    layoutMetrics: null, // 布局算法指标
   }),
   getters: {
     totalCount: (state) => state.poiList.length,
@@ -325,6 +329,15 @@ export const usePoiStore = defineStore('poiStore', {
         ...poi,
         fontColor: this.colorSettings.palette[index % this.colorSettings.palette.length],
       }));
+    },
+    updateAlgorithmSettings(payload) {
+      this.algorithmSettings = {
+        ...this.algorithmSettings,
+        ...payload,
+      };
+    },
+    setLayoutMetrics(metrics) {
+      this.layoutMetrics = metrics;
     },
     setSelectionContext(context) {
       this.selectionCenter = context?.center ?? null;

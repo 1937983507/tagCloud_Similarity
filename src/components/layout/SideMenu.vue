@@ -36,12 +36,16 @@ import {
   BrushFilled,
   Collection,
   EditPen,
+  Operation,
+  DataAnalysis,
 } from '@element-plus/icons-vue';
 
 const mainMenu = [
   { key: 'content', label: '内容', icon: Collection },
+  { key: 'algorithm', label: '算法', icon: Operation },
   { key: 'typeface', label: '字体', icon: EditPen },
   { key: 'color', label: '配色', icon: BrushFilled },
+  { key: 'batchtest', label: '批量测试', icon: DataAnalysis },
 ];
 
 const handleShortcutClick = () => {

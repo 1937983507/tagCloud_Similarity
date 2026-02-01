@@ -65,7 +65,7 @@
       
       <!-- 距离图例 -->
       <div class="distance-legend">
-        <p class="legend-title">{{ poiStore.fontSettings.language === 'en' ? 'Distance from Center (km)' : '与中心的距离(km)' }}</p>
+        <p class="legend-title">{{ poiStore.fontSettings.language === 'en' ? 'Semantic Similarity' : '语义相似度' }}</p>
         <div class="legend-colors-wrapper">
           <div class="legend-colors" ref="legendColorsRef">
             <div
@@ -77,22 +77,22 @@
               @mouseleave="handleLegendLeave"
             ></div>
           </div>
-          <!-- 在色块下面一行显示距离标签 -->
-          <div v-if="allowRenderCloud && colorBoundaries.length > 0 && maxDistance > 0" class="legend-boundaries">
-            <span class="legend-boundary-label legend-start">0</span>
+          <!-- 在色块下面一行显示相似度标签 -->
+          <div v-if="allowRenderCloud && colorBoundaries.length > 0 && maxSimilarity !== undefined && minSimilarity !== undefined" class="legend-boundaries">
+            <span class="legend-boundary-label legend-start">{{ formatSimilarity(maxSimilarity) }}</span>
             <span
               v-for="(boundary, index) in colorBoundaries"
               :key="`boundary-${index}`"
               class="legend-boundary-label legend-middle"
               :style="{ left: `${((index + 1) * 100) / paletteCount}%` }"
             >
-              {{ formatDistance(boundary) }}
+              {{ formatSimilarity(boundary) }}
             </span>
             <span
-              v-if="maxDistance > 0"
+              v-if="minSimilarity !== undefined"
               class="legend-boundary-label legend-max-distance"
             >
-              {{ formatDistance(maxDistance) }}
+              {{ formatSimilarity(minSimilarity) }}
             </span>
           </div>
         </div>
@@ -224,7 +224,8 @@ import { usePoiStore } from '@/stores/poiStore';
 import { cityNameToPinyin } from '@/utils/cityNameToPinyin';
 import { recordTagCloudGeneration } from '@/utils/statistics';
 import { calculateSimilarities, getSimilarityLevel } from '@/utils/similarity';
-import { layoutTagCloud } from '@/utils/tagCloudLayout';
+import { layoutTagCloud, measureText } from '@/utils/tagCloudLayout';
+import { calculateLayoutMetrics } from '@/utils/layoutMetrics';
 import AMapLoader from '@amap/amap-jsapi-loader';
 import introJs from 'intro.js';
 import 'intro.js/minified/introjs.min.css';
@@ -262,7 +263,9 @@ let isPanning = ref(true); // 是否启用漫游（默认开启）
 let vpt = [1, 0, 0, 1, 0, 0]; // viewport transform
 let originalCenterX = 0;
 let originalCenterY = 0;
-const maxDistance = ref(0); // 最大距离（米）- 使用ref以便响应式更新
+const maxDistance = ref(0); // 最大距离（米）- 使用ref以便响应式更新（保留用于其他用途）
+const maxSimilarity = ref(undefined); // 最大相似度 - 使用ref以便响应式更新
+const minSimilarity = ref(undefined); // 最小相似度 - 使用ref以便响应式更新
 let poisPyramid = []; // POI数据金字塔
 let tagCloudScale = 0; // 当前显示层级
 const pyramidUpdateTrigger = ref(0); // 用于触发computed更新的触发器
@@ -288,7 +291,7 @@ const similarityProgress = ref(0); // 相似度计算进度（0-100）
 
 let secondIntroStarted = false;
 
-// 计算各个色块之间的分界点距离值
+// 计算各个色块之间的分界点相似度值
 const calculateColorBoundaries = () => {
   // 访问触发器以确保响应式
   pyramidUpdateTrigger.value;
@@ -303,48 +306,39 @@ const calculateColorBoundaries = () => {
     return [];
   }
   
-  // 确保有距离数据
-  if (maxDistance.value === 0) {
-    return [];
-  }
+  // 过滤出有相似度数据的POI（排除中心地点）
+  const poisWithSimilarity = currentData.filter(
+    poi => poi.similarity !== undefined && poi.similarity !== null
+  );
   
-  // 获取中心位置（优先使用绘制覆盖物的中心点）
-  let center;
-  if (poiStore.selectionCenter) {
-    center = {
-      lng: poiStore.selectionCenter.lng,
-      lat: poiStore.selectionCenter.lat,
-    };
-  } else {
-    center = computeCenter(sourceList);
+  if (poisWithSimilarity.length === 0) {
+    return [];
   }
   
   const colorSettings = poiStore.colorSettings;
   const colorNum = colorSettings.discreteCount || colorSettings.palette.length;
   const discreteMethod = colorSettings.discreteMethod || 'quantile';
   
-  // 计算所有POI的距离
-  const entriesWithDistance = currentData.map((poi) => {
-    const distance = calculateDistance(
-      center.lat,
-      center.lng,
-      poi.lat,
-      poi.lng,
-    );
-    return { poi, distance };
+  // 获取所有POI的相似度值
+  const entriesWithSimilarity = poisWithSimilarity.map((poi) => {
+    return { poi, similarity: poi.similarity };
   });
   
-  // 按距离升序排序
-  entriesWithDistance.sort((a, b) => a.distance - b.distance);
+  // 按相似度降序排序（相似度高的在前）
+  entriesWithSimilarity.sort((a, b) => b.similarity - a.similarity);
   
-  const distances = entriesWithDistance.map(entry => entry.distance);
-  if (distances.length === 0) return [];
+  const similarities = entriesWithSimilarity.map(entry => entry.similarity);
+  if (similarities.length === 0) return [];
+  
+  // 更新最大和最小相似度（用于图例显示）
+  maxSimilarity.value = Math.max(...similarities);
+  minSimilarity.value = Math.min(...similarities);
   
   // 预先计算颜色分类所需的公共值
   let colorCache = {};
   if (discreteMethod === 'equal' || discreteMethod === 'geometric') {
-    colorCache.minValue = Math.min(...distances);
-    colorCache.maxValue = Math.max(...distances);
+    colorCache.minValue = Math.min(...similarities);
+    colorCache.maxValue = Math.max(...similarities);
     if (discreteMethod === 'geometric') {
       colorCache.ratio = Math.pow(colorCache.maxValue / colorCache.minValue, 1 / colorNum);
     } else {
@@ -352,32 +346,32 @@ const calculateColorBoundaries = () => {
       colorCache.interval = colorCache.range / colorNum;
     }
   } else if (discreteMethod === 'stddev') {
-    colorCache.mean = distances.reduce((acc, curr) => acc + curr, 0) / distances.length;
+    colorCache.mean = similarities.reduce((acc, curr) => acc + curr, 0) / similarities.length;
     colorCache.stdDev = Math.sqrt(
-      distances.reduce((acc, curr) => acc + Math.pow(curr - colorCache.mean, 2), 0) /
-        distances.length,
+      similarities.reduce((acc, curr) => acc + Math.pow(curr - colorCache.mean, 2), 0) /
+        similarities.length,
     );
     colorCache.stdDevInterval = colorCache.stdDev / colorNum;
     colorCache.halfColorNum = Math.floor(colorNum / 2);
   } else if (discreteMethod === 'jenks') {
-    const values = [...distances].sort((a, b) => a - b);
+    const values = [...similarities].sort((a, b) => a - b);
     colorCache.jenksBreaks = calculateJenks(values, colorNum);
   }
   
   // 为每个entry计算classIndex
-  const entriesWithClass = entriesWithDistance.map((entry, index) => {
+  const entriesWithClass = entriesWithSimilarity.map((entry, index) => {
     let classIndex = 0;
     
     if (discreteMethod === 'quantile') {
-      const percentile = (index + 1) / entriesWithDistance.length;
+      const percentile = (index + 1) / entriesWithSimilarity.length;
       classIndex = Math.ceil(colorNum * percentile) - 1;
     } else {
-      // calculateClassIndexOptimized期望entry有distance属性
-      const entryForClass = { distance: entry.distance };
+      // calculateClassIndexOptimized期望entry有distance属性，这里改为similarity
+      const entryForClass = { distance: entry.similarity }; // 复用distance字段名
       classIndex = calculateClassIndexOptimized(
         entryForClass,
         index,
-        entriesWithDistance.length,
+        entriesWithSimilarity.length,
         colorNum,
         discreteMethod,
         colorCache,
@@ -386,18 +380,24 @@ const calculateColorBoundaries = () => {
     return { ...entry, classIndex };
   });
   
-  // 计算每个色块的最大距离值（作为分界点），不包含最后一个色块
+  // 计算每个色块的最小相似度值（作为分界点），不包含最后一个色块
+  // 注意：相似度高的用前面的颜色，相似度低的用后面的颜色
+  // 所以分界点应该是每个等级的最小相似度（即该等级的下界）
   const boundaries = [];
   for (let i = 0; i < colorNum - 1; i++) {
     const entriesInClass = entriesWithClass.filter(e => e.classIndex === i);
     if (entriesInClass.length > 0) {
-      const maxDist = Math.max(...entriesInClass.map(e => e.distance));
-      boundaries.push(maxDist);
+      // 获取该等级的最小相似度（作为下界）
+      const minSim = Math.min(...entriesInClass.map(e => e.similarity));
+      boundaries.push(minSim);
     } else {
-      // 如果没有数据，使用前一个分界点或最小值
-      boundaries.push(i > 0 ? boundaries[i - 1] : 0);
+      // 如果没有数据，使用前一个分界点或最大值
+      boundaries.push(i > 0 ? boundaries[i - 1] : maxSimilarity.value);
     }
   }
+  
+  // 按相似度降序排序边界（从高到低）
+  boundaries.sort((a, b) => b - a);
   
   return boundaries;
 };
@@ -418,12 +418,22 @@ const formatDistance = (distanceInMeters) => {
   return distanceInKm.toFixed(1);
 };
 
-// 各个色块之间的分界点距离值
+// 格式化相似度数值，显示为百分比或小数
+const formatSimilarity = (similarity) => {
+  if (similarity === undefined || similarity === null) {
+    return '0.00';
+  }
+  // 相似度通常在-1到1之间，显示为3位小数
+  return similarity.toFixed(3);
+};
+
+// 各个色块之间的分界点相似度值
 const colorBoundaries = computed(() => {
   // 访问触发器以确保响应式
   pyramidUpdateTrigger.value;
-  // 访问 maxDistance 以确保响应式
-  maxDistance.value;
+  // 访问相似度值以确保响应式
+  maxSimilarity.value;
+  minSimilarity.value;
   return calculateColorBoundaries();
 });
 
@@ -720,19 +730,24 @@ const renderCloud = async (shouldInitPyramid = false) => {
     }
 
     // 计算相似度的最小值和最大值（用于分级）
-    const minSimilarity = Math.min(...similarities);
-    const maxSimilarity = Math.max(...similarities);
-    const similarityRange = maxSimilarity - minSimilarity;
+    const localMinSimilarity = Math.min(...similarities);
+    const localMaxSimilarity = Math.max(...similarities);
+    const similarityRange = localMaxSimilarity - localMinSimilarity;
 
     // 为当前尺度下的POI分配字号和颜色
+    // 计算中心标签字号（比第1级字号大20%）
+    const firstLevelFontSize = fontSizes && fontSizes.length > 0 ? fontSizes[0] : 64;
+    const centerFontSize = firstLevelFontSize * 1.2; // 比第1级大20%（不乘以resolutionScale，因为会在绘制时统一处理）
+    
     const poisWithStyle = poisToRender.map((poi) => {
       if (poi.id === centerPoi.id) {
-        // 中心地点使用最大字号和第一个颜色
+        // 中心地点使用特殊样式（与drawCenter函数中的样式一致）
         return {
           ...poi,
-          fontSize: fontSizes[fontSizes.length - 1] || fontSizes[0],
-          fontColor: palette[0] || '#000000',
+          fontSize: centerFontSize,
+          fontColor: 'rgb(255, 255, 255)', // 白色
           similarityLevel: 0,
+          isCenter: true, // 标记为中心标签
         };
       }
 
@@ -741,7 +756,7 @@ const renderCloud = async (shouldInitPyramid = false) => {
       // 将相似度映射到等级（相似度大的等级高，字号大）
       // 相似度范围归一化到 [0, 1]，然后映射到等级
       const normalizedSimilarity = similarityRange > 0 
-        ? (similarity - minSimilarity) / similarityRange 
+        ? (similarity - localMinSimilarity) / similarityRange 
         : 0;
       
       // 相似度大的等级高（反向映射，因为fontSizes数组是从大到小）
@@ -765,12 +780,21 @@ const renderCloud = async (shouldInitPyramid = false) => {
       };
     });
 
-    // 计算最大距离（用于图例）
+    // 计算最大距离（保留用于其他用途）
     const distances = poisToRender.map(poi => {
       if (poi.id === centerPoi.id) return 0;
       return calculateDistance(center.lat, center.lng, poi.lat, poi.lng);
     });
     maxDistance.value = Math.max(...distances, 0);
+    
+    // 计算最大和最小相似度（用于图例）- 使用上面已经计算好的 similarities
+    if (similarities.length > 0) {
+      maxSimilarity.value = Math.max(...similarities);
+      minSimilarity.value = Math.min(...similarities);
+    } else {
+      maxSimilarity.value = undefined;
+      minSimilarity.value = undefined;
+    }
 
     // 清空canvas
     canvasInstance.clear();
@@ -781,35 +805,92 @@ const renderCloud = async (shouldInitPyramid = false) => {
     const centerX = canvasWidth.value / 2;
     const centerY = canvasHeight.value / 2;
 
-    // 绘制中心位置，并获取中心标签的矩形信息
-    const centerLabelRect = drawCenter(centerX, centerY, center, sourceList);
-
+    // 获取当前选择的布局算法
+    const layoutAlgorithm = poiStore.algorithmSettings?.layoutAlgorithm || 'multi-angle-radial';
+    
     // 创建POI ID到样式的映射（用于快速查找）
     const poiStyleMap = new Map();
     poisWithStyle.forEach(poi => {
       poiStyleMap.set(poi.id, poi);
     });
 
-    // 使用布局算法生成标签云（传入中心标签矩形，避免压盖）
-    const poisForLayout = poisToRender
-      .filter(poi => poi.id !== centerPoi.id)
-      .map(poi => {
-        // 从样式映射中获取样式信息
+    // 根据算法类型准备POI数据和中心标签处理
+    let poisForLayout;
+    let centerLabelRect = null;
+    
+    if (layoutAlgorithm === 'archimedean-spiral') {
+      // d3-cloud 算法：将中心标签也纳入布局，不单独绘制
+      // 确保中心标签被包含在布局中
+      const centerPoiStyled = poiStyleMap.get(centerPoi.id);
+      if (!centerPoiStyled) {
+        console.warn('中心标签不在样式映射中，使用默认样式');
+      }
+      
+      // 从 poisToRender 中获取所有POI（可能不包含中心标签）
+      const poisFromRender = poisToRender.map(poi => {
         const styledPoi = poiStyleMap.get(poi.id) || poi;
         return styledPoi;
       });
-
-    const layoutResults = layoutTagCloud(
+      
+      // 检查中心标签是否已经在列表中
+      const hasCenterPoi = poisFromRender.some(p => p.id === centerPoi.id);
+      if (hasCenterPoi) {
+        poisForLayout = poisFromRender;
+      } else {
+        // 如果中心标签不在列表中，添加到最前面（确保大号字体优先布局）
+        if (centerPoiStyled) {
+          poisForLayout = [centerPoiStyled, ...poisFromRender];
+        } else {
+          // 如果样式映射中没有中心标签，使用原始 centerPoi 并应用样式
+          const fontSizes = poiStore.fontSettings.fontSizes;
+          const firstLevelFontSize = fontSizes && fontSizes.length > 0 ? fontSizes[0] : 64;
+          const centerFontSize = firstLevelFontSize * 1.2; // 比第1级大20%（不乘以resolutionScale，因为会在绘制时统一处理）
+          const centerPoiWithStyle = {
+            ...centerPoi,
+            fontSize: centerFontSize,
+            fontColor: 'rgb(255, 255, 255)', // 白色，与drawCenter一致
+            similarityLevel: 0,
+            isCenter: true, // 标记为中心标签
+          };
+          poisForLayout = [centerPoiWithStyle, ...poisFromRender];
+        }
+      }
+      
+      console.log(`d3-cloud 布局：准备 ${poisForLayout.length} 个标签，中心标签ID: ${centerPoi.id}，是否包含: ${poisForLayout.some(p => p.id === centerPoi.id)}`);
+      // d3-cloud 不需要 centerLabelRect，因为中心标签也在布局中
+    } else {
+      // 其他算法：单独绘制中心标签，排除中心标签进行布局
+      centerLabelRect = drawCenter(centerX, centerY, centerPoi);
+      poisForLayout = poisToRender
+        .filter(poi => poi.id !== centerPoi.id)
+        .map(poi => {
+          // 从样式映射中获取样式信息
+          const styledPoi = poiStyleMap.get(poi.id) || poi;
+          return styledPoi;
+        });
+    }
+    
+    // 调用布局函数（d3-cloud 返回 Promise，其他算法返回数组）
+    // 记录布局开始时间
+    const layoutStartTime = performance.now();
+    
+    const layoutResult = layoutTagCloud(
       poisForLayout,
       center,
       centerX,
       centerY,
       poiStore.fontSettings,
       getPoiDisplayName,
-      false, // showRank - 已删除
-      false, // showTime - 已删除
-      centerLabelRect // 传递中心标签矩形
+      centerLabelRect, // 传递中心标签矩形（非d3-cloud算法使用）
+      layoutAlgorithm // 传递算法类型
     );
+    
+    // 处理异步布局（d3-cloud）或同步布局（其他算法）
+    const layoutResults = await (layoutResult instanceof Promise ? layoutResult : Promise.resolve(layoutResult));
+    
+    // 记录布局结束时间
+    const layoutEndTime = performance.now();
+    const layoutTime = layoutEndTime - layoutStartTime;
 
     // 在canvas上绘制标签
     layoutResults.forEach((result) => {
@@ -817,13 +898,19 @@ const renderCloud = async (shouldInitPyramid = false) => {
       // 从样式映射中获取颜色和字号
       const styledPoi = poiStyleMap.get(poi.id) || poi;
       
+      // 判断是否为中心标签
+      const isCenterLabel = poi.id === centerPoi.id || styledPoi.isCenter;
+      
+      // 中心标签使用特殊样式（与drawCenter函数中的样式一致）
       const textObj = new Textbox(result.text, {
         left: result.x,
         top: result.y,
-        fill: styledPoi.fontColor || poiStore.colorSettings.palette[0],
+        fill: isCenterLabel ? 'rgb(255, 255, 255)' : (styledPoi.fontColor || poiStore.colorSettings.palette[0]),
         fontSize: result.fontSize * resolutionScale,
-        fontFamily: poiStore.fontSettings.fontFamily,
-        fontWeight: poiStore.fontSettings.fontWeight,
+        fontFamily: isCenterLabel ? 'Comic Sans' : poiStore.fontSettings.fontFamily,
+        fontWeight: isCenterLabel ? 1000 : poiStore.fontSettings.fontWeight,
+        strokeWidth: isCenterLabel ? 5 : 0,
+        stroke: isCenterLabel ? 'rgba(255,255,255,0.7)' : undefined,
         textAlign: 'center',
         originX: 'center',
         originY: 'center',
@@ -844,6 +931,18 @@ const renderCloud = async (shouldInitPyramid = false) => {
     // 触发金字塔更新，确保距离标签能正确显示
     pyramidUpdateTrigger.value++;
 
+    // 计算布局指标
+    const metrics = calculateLayoutMetrics(
+      layoutResults,
+      center,
+      centerX,
+      centerY,
+      layoutTime
+    );
+    
+    // 将指标存储到store
+    poiStore.setLayoutMetrics(metrics);
+
     // 记录统计信息
     if (shouldInitPyramid) {
       recordTagCloudGeneration({
@@ -853,7 +952,7 @@ const renderCloud = async (shouldInitPyramid = false) => {
       });
     }
 
-    console.log('标签云渲染完成');
+    console.log('标签云渲染完成', metrics);
   } catch (error) {
     console.error('渲染标签云失败:', error);
     alert('生成标签云失败: ' + (error.message || '未知错误'));
@@ -885,6 +984,8 @@ const clearTagCloud = () => {
   isClearing.value = true;
   allowRenderCloud.value = false;
   maxDistance.value = 0;
+  maxSimilarity.value = undefined;
+  minSimilarity.value = undefined;
   poisPyramid = [];
   tagCloudScale = 0;
   isRendering = false;
@@ -1177,16 +1278,15 @@ const calculateClassIndex = (data, index, total, colorNum, discreteMethod) => {
   return calculateClassIndexOptimized(entry, index, total, colorNum, discreteMethod, colorCache);
 };
 
-// 绘制中心位置
-const drawCenter = (centerX, centerY, center, sourceList) => {
-  const language = poiStore.fontSettings.language || 'zh';
+// 找到距离中心最近的POI作为中心地点
+const findCenterPoi = (center, sourceList) => {
+  if (!sourceList || sourceList.length === 0) {
+    return null;
+  }
   
-  // 找到距离中心最近的POI作为中心标签
-  let centerLabelText;
-  let nearestPoi = null;
-  let minDistance = Infinity;
-  
-  if (sourceList && sourceList.length > 0) {
+    let nearestPoi = null;
+    let minDistance = Infinity;
+    
     for (const poi of sourceList) {
       const distance = calculateDistance(
         center.lat,
@@ -1200,27 +1300,33 @@ const drawCenter = (centerX, centerY, center, sourceList) => {
       }
     }
     
-    // 如果找到最近的POI，使用它的名称
-    if (nearestPoi) {
-      centerLabelText = getPoiDisplayName(nearestPoi);
+  return nearestPoi;
+};
+
+// 绘制中心位置（接收中心POI作为参数）
+const drawCenter = (centerX, centerY, centerPoi) => {
+  const language = poiStore.fontSettings.language || 'zh';
+  
+  // 获取中心标签文本
+  let centerLabelText;
+  if (centerPoi) {
+    centerLabelText = getPoiDisplayName(centerPoi);
     } else {
-      // 如果没有找到，使用默认文本
-      centerLabelText = language === 'en' ? 'Center' : '中心位置';
-    }
-  } else {
-    // 显示"中心位置"
+    // 如果没有中心POI，使用默认文本
     centerLabelText = language === 'en' ? 'Center' : '中心位置';
   }
   
   // 中心标签字号：比第1级字号大一点（第1级是fontSizes[0]）
   const fontSizes = poiStore.fontSettings.fontSizes;
   const firstLevelFontSize = fontSizes && fontSizes.length > 0 ? fontSizes[0] : 64;
-  const centerFontSize = (firstLevelFontSize * 1.2) * resolutionScale; // 比第1级大20%
+  const centerFontSizeLogical = firstLevelFontSize * 1.2; // 逻辑字号（不包含 resolutionScale）
+  const centerFontSize = centerFontSizeLogical * resolutionScale; // 实际绘制字号（包含 resolutionScale）
+  
   const centerText = new Textbox(centerLabelText, {
     left: centerX,
     top: centerY,
     fill: 'rgb(255, 255, 255)',
-    fontSize: centerFontSize,
+    fontSize: centerFontSize, // 绘制时使用包含 resolutionScale 的字号
     strokeWidth: 5,
     fontWeight: 1000,
     stroke: 'rgba(255,255,255,0.7)',
@@ -1232,9 +1338,15 @@ const drawCenter = (centerX, centerY, center, sourceList) => {
   });
   canvasInstance.add(centerText);
   
-  // 计算中心标签的尺寸并返回
-  const centerTextWidth = centerText.width || centerLabelText.length * centerFontSize * 0.6;
-  const centerTextHeight = centerText.height || centerFontSize * 1.2;
+  // 使用统一的 measureText 函数计算中心标签的尺寸
+  // 注意：为了与布局算法保持一致，使用逻辑字号（不包含 resolutionScale）
+  // 这样返回的 centerLabelRect 尺寸与其他标签的尺寸在同一坐标系中
+  const { width: centerTextWidth, height: centerTextHeight } = measureText(
+    centerLabelText,
+    centerFontSizeLogical, // 使用逻辑字号，与布局算法保持一致
+    'Comic Sans', // 中心标签使用的字体
+    1000 // 中心标签使用的字体粗细
+  );
   
   return {
     x: centerX - centerTextWidth / 2,
@@ -1830,7 +1942,7 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
   
   // 获取语言设置
   const language = poiStore.fontSettings.language || 'zh';
-  const titleText = language === 'en' ? 'Distance from Center (km)' : '与中心的距离(km)';
+  const titleText = language === 'en' ? 'Semantic Similarity' : '语义相似度';
   
   // 获取颜色调色板
   const palette = poiStore.colorSettings.palette || [];
@@ -1839,9 +1951,9 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
   
   // 计算各个色块之间的分界点
   const boundaries = calculateColorBoundaries();
-  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value;
+  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value && maxSimilarity.value !== undefined && minSimilarity.value !== undefined;
   
-  // 如果有距离标签，需要增加高度
+  // 如果有相似度标签，需要增加高度
   const boundaryTextHeight = hasBoundaries ? textFontSize + 4 : 0;
   const legendHeightWithBoundaries = legendHeight + boundaryTextHeight;
   
@@ -1849,7 +1961,7 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
   let legendSVG = '';
   
   // 定义图例组
-  legendSVG += `<g id="distance-legend">`;
+  legendSVG += `<g id="similarity-legend">`;
   
   // 绘制圆角矩形背景
   legendSVG += `<rect x="${legendX}" y="${legendY}" width="${legendWidth}" height="${legendHeightWithBoundaries}" rx="${radius}" ry="${radius}" fill="rgba(0,0,0,0.7)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;
@@ -1881,27 +1993,28 @@ const generateLegendSVG = (canvasWidth, canvasHeight) => {
     currentX += colorBarWidth + colorBarGap;
   });
   
-  // 在色块下面一行绘制距离标签
+  // 在色块下面一行绘制相似度标签
   if (hasBoundaries) {
     const boundaryTextY = colorBarY + colorBarHeight + 4 + textFontSize;
     
-    // 绘制第一个标签 "0"（在第一个色块的左边界）
-    legendSVG += `<text x="${legendX + padding}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="start">0</text>`;
+    // 绘制第一个标签（最大相似度，在第一个色块的左边界）
+    const maxSimText = formatSimilarity(maxSimilarity.value);
+    legendSVG += `<text x="${legendX + padding}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="start">${escapeXML(maxSimText)}</text>`;
     
     // 绘制分界点标签（在每个色块的右边界）
     let currentX = legendX + padding;
     boundaries.forEach((boundary, index) => {
       currentX += colorBarWidth + colorBarGap;
-      const boundaryText = formatDistance(boundary);
+      const boundaryText = formatSimilarity(boundary);
       legendSVG += `<text x="${currentX}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="middle">${escapeXML(boundaryText)}</text>`;
     });
     
-    // 绘制最远距离标签（在最右边）
-    if (maxDistance.value > 0) {
-      const maxDistanceText = formatDistance(maxDistance.value);
+    // 绘制最小相似度标签（在最右边）
+    if (minSimilarity.value !== undefined) {
+      const minSimText = formatSimilarity(minSimilarity.value);
       const totalBarWidth = legendWidth - padding * 2;
       const rightEdgeX = legendX + padding + totalBarWidth; // 最后一个色块右边界
-      legendSVG += `<text x="${rightEdgeX}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="middle">${escapeXML(maxDistanceText)}</text>`;
+      legendSVG += `<text x="${rightEdgeX}" y="${boundaryTextY}" font-family="sans-serif" font-size="${textFontSize}" fill="rgba(255,255,255,0.8)" text-anchor="middle">${escapeXML(minSimText)}</text>`;
     }
   }
   
@@ -1990,7 +2103,7 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   const language = poiStore.fontSettings.language || 'zh';
-  const titleText = language === 'en' ? 'Distance from Center (km)' : '与中心的距离(km)';
+  const titleText = language === 'en' ? 'Semantic Similarity' : '语义相似度';
   ctx.fillText(titleText, legendX + padding, legendY + padding);
   
   // 绘制颜色条
@@ -2001,9 +2114,9 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
   
   // 计算各个色块之间的分界点
   const boundaries = calculateColorBoundaries();
-  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value;
+  const hasBoundaries = boundaries.length > 0 && allowRenderCloud.value && maxSimilarity.value !== undefined && minSimilarity.value !== undefined;
   
-  // 如果有距离标签，需要增加高度
+  // 如果有相似度标签，需要增加高度
   const boundaryTextHeight = hasBoundaries ? textFontSize + 4 * scaleY : 0;
   const legendHeightWithBoundaries = legendHeight + boundaryTextHeight;
   
@@ -2034,7 +2147,7 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
     currentX += colorBarWidth + colorBarGap;
   });
   
-  // 在色块下面一行绘制距离标签
+  // 在色块下面一行绘制相似度标签
   if (hasBoundaries) {
     const boundaryTextY = colorBarY + colorBarHeight + 4 * scaleY + textFontSize;
     
@@ -2042,26 +2155,27 @@ const drawLegendOnCanvas = (ctx, imageWidth, imageHeight, scaleX, scaleY, offset
     ctx.font = `${textFontSize}px sans-serif`;
     ctx.textBaseline = 'top';
     
-    // 绘制第一个标签 "0"（在第一个色块的左边界）
+    // 绘制第一个标签（最大相似度，在第一个色块的左边界）
     ctx.textAlign = 'left';
-    ctx.fillText('0', legendX + padding, boundaryTextY);
+    const maxSimText = formatSimilarity(maxSimilarity.value);
+    ctx.fillText(maxSimText, legendX + padding, boundaryTextY);
     
     // 绘制分界点标签（在每个色块的右边界）
     ctx.textAlign = 'center';
     let currentX = legendX + padding;
     boundaries.forEach((boundary, index) => {
       currentX += colorBarWidth + colorBarGap;
-      const boundaryText = formatDistance(boundary);
+      const boundaryText = formatSimilarity(boundary);
       ctx.fillText(boundaryText, currentX, boundaryTextY);
     });
     
-    // 绘制最远距离标签（在最右边）
-    if (maxDistance.value > 0) {
-      const maxDistanceText = formatDistance(maxDistance.value);
+    // 绘制最小相似度标签（在最右边）
+    if (minSimilarity.value !== undefined) {
+      const minSimText = formatSimilarity(minSimilarity.value);
       const totalBarWidth = legendWidth - padding * 2;
       const rightEdgeX = legendX + padding + totalBarWidth; // 最后一个色块右边界
       ctx.textAlign = 'center';
-      ctx.fillText(maxDistanceText, rightEdgeX, boundaryTextY);
+      ctx.fillText(minSimText, rightEdgeX, boundaryTextY);
     }
   }
 };
@@ -2255,7 +2369,21 @@ watch(
   },
 );
 
+// 监听算法设置变化，触发重新渲染
+watch(
+  () => poiStore.algorithmSettings?.layoutAlgorithm,
+  () => {
+    // 如果正在清除，不触发重新渲染
+    if (isClearing.value) return;
+    
+    if (allowRenderCloud.value) {
+      // 算法变化需要重新绘制
+      renderCloud(false);
+    }
+  },
+);
 
+  
 
 onBeforeUnmount(() => {
   if (resizeObserver && wrapperRef.value) {
@@ -2525,8 +2653,10 @@ canvas {
 }
 
 .legend-boundary-label.legend-start {
-  left: 2px;
-  text-align: left;
+  left: 0;
+  text-align: right;
+  transform: translateX(-50%);
+  padding-right: 2px;
 }
 
 .legend-boundary-label.legend-middle {
