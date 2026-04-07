@@ -124,9 +124,9 @@ ollama serve
 npm install
 ```
 
-### 4. 配置高德地图 Key（可选）
+### 4. 环境变量
 
-如果需要使用地图功能，请在 `src/components/content/PoiMap.vue` 中替换高德地图的 API Key。
+复制 `.env.example` 为 `.env`，至少填写 `VITE_AMAP_KEY`（高德 JSAPI Key，用于地图与驾车路线）。可选：`VITE_AMAP_SECURITY_JS_CODE`（安全密钥）、`VITE_STATS_API_URL`（统计后端）。`.env` 已列入 `.gitignore`，勿提交；部署时在构建环境注入同名变量。
 
 ### 5. 启动开发服务器
 
