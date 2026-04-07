@@ -139,6 +139,7 @@
 import { ArrowDown, Loading } from '@element-plus/icons-vue';
 import { usePoiStore } from '@/stores/poiStore';
 import AMapLoader from '@amap/amap-jsapi-loader';
+import { getAmapLoaderConfig } from '@/config/amapLoader';
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 
 const poiStore = usePoiStore();
@@ -170,27 +171,27 @@ let geolocation = null; // 高德定位实例
 let geocoder = null; // 地理编码实例
 
 const loadMap = async () => {
-  amapGlobal = await AMapLoader.load({
-    key: '80838eddfb922202b289fd1ad6fa4e58',
-    version: '2.0',
-    plugins: [
-      'AMap.ToolBar',
-      'AMap.Scale',
-      'AMap.AutoComplete',
-      'AMap.PlaceSearch',
-      'AMap.TileLayer.Satellite',
-      'AMap.TileLayer.RoadNet',
-      'AMap.TileLayer.Traffic',
-      'AMap.HeatMap',
-      'AMap.MouseTool',
-      'AMap.GeometryUtil',
-      'AMap.MassMarks',
-      'AMap.CircleEditor',
-      'AMap.RectangleEditor',
-      'AMap.Geolocation', // 添加高德定位插件
-      'AMap.Geocoder', // 添加地理编码插件，用于地点搜索
-    ],
-  });
+  amapGlobal = await AMapLoader.load(
+    getAmapLoaderConfig({
+      plugins: [
+        'AMap.ToolBar',
+        'AMap.Scale',
+        'AMap.AutoComplete',
+        'AMap.PlaceSearch',
+        'AMap.TileLayer.Satellite',
+        'AMap.TileLayer.RoadNet',
+        'AMap.TileLayer.Traffic',
+        'AMap.HeatMap',
+        'AMap.MouseTool',
+        'AMap.GeometryUtil',
+        'AMap.MassMarks',
+        'AMap.CircleEditor',
+        'AMap.RectangleEditor',
+        'AMap.Geolocation', // 添加高德定位插件
+        'AMap.Geocoder', // 添加地理编码插件，用于地点搜索
+      ],
+    }),
+  );
 
   mapInstance = new amapGlobal.Map(mapRef.value, {
     zoom: 7,

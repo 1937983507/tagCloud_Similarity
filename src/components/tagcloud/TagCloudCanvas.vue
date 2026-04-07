@@ -227,6 +227,7 @@ import { calculateSimilarities, getSimilarityLevel } from '@/utils/similarity';
 import { layoutTagCloud, measureText } from '@/utils/tagCloudLayout';
 import { calculateLayoutMetrics } from '@/utils/layoutMetrics';
 import AMapLoader from '@amap/amap-jsapi-loader';
+import { getAmapLoaderConfig } from '@/config/amapLoader';
 import introJs from 'intro.js';
 import 'intro.js/minified/introjs.min.css';
 import {
@@ -1026,11 +1027,9 @@ const initAMapDriving = async () => {
   if (amapGlobal && drivingInstance) return; // 已经初始化
   
   try {
-    amapGlobal = await AMapLoader.load({
-      key: '80838eddfb922202b289fd1ad6fa4e58',
-      version: '2.0',
-      plugins: ['AMap.Driving'],
-    });
+    amapGlobal = await AMapLoader.load(
+      getAmapLoaderConfig({ plugins: ['AMap.Driving'] }),
+    );
     
     // 创建驾车路径规划实例
     drivingInstance = new amapGlobal.Driving({
